@@ -1,6 +1,6 @@
 ### PyISV repo
 
-The repository contain the libraries to train a autoencoder-like neural network, used and described in the work https://doi.org/10.48550/arXiv.2407.17924
+The repository contain the libraries to train a autoencoder-like neural network, used and described in the work https://doi.org/10.48550/arXiv.2407.17924 and https://doi.org/10.1021/acsnano.3c05653
 
 # Folders
 - PyISV contains the file with the classes and the functions used:
@@ -15,4 +15,4 @@ The repository contain the libraries to train a autoencoder-like neural network,
 
 # Installation
 Clone the repo and install it in your environment using:
-pip install . or pip install -e . 
+" pip install . " or " pip install -e . " 

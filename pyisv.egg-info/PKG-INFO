@@ -1,0 +1,22 @@
+Metadata-Version: 2.2
+Name: pyisv
+Version: 0.1.0
+Summary: Repository for implementing the methods presented in https://doi.org/10.48550/arXiv.2407.17924 and  https://doi.org/10.1021/acsnano.3c05653 
+Home-page: https://github.com/etela995/PyISV.git
+Author: Emanuele Telari
+Author-email: telariemanuele@gmail.com
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Requires-Dist: numpy
+Requires-Dist: torch
+Requires-Dist: torchsummary
+Requires-Dist: scikit-learn
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: home-page
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

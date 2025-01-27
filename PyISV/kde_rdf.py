@@ -41,18 +41,15 @@ def compute_distances(AtomPos: torch.Tensor) -> torch.Tensor:
     indices = torch.triu_indices((n_atoms),(n_atoms), offset = 1)
     return torch.sqrt(distances[indices[0], indices[1]])
 
-@torch.jit.script
-def compute_periodic_distances(AtomPos: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
-    y2 = torch.sum(AtomPos**2, 1)
-    x2 = y2.reshape(-1, 1)
-    xy = torch.matmul(AtomPos, AtomPos.T)
-    distances = (x2 - 2*xy + y2)
-    n_atoms = len(AtomPos)
-    return torch.sqrt(distances[indices[0], indices[1]])
+def compute_asepbc_distances(Atoms):
+    distances = Atoms.get_all_distances(mic=True)
+    n_atoms = len(distances)
+    indices = torch.triu_indices((n_atoms),(n_atoms), offset = 1)
+    return torch.Tensor(distances[indices[0], indices[1]])
 
 def torch_rdf_calc(pos: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
     return normalized_histogram(compute_distances(pos).unsqueeze(0), bins, computefactor(bins), bandwidth)
 
+def ase_periodic_torch_rdf_calc(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
+    return normalized_histogram(compute_asepbc_distances(Atoms).unsqueeze(0), bins, computefactor(bins), bandwidth)
 
-def periodic_torch_rdf_calc(pos: torch.Tensor, indices: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
-    return normalized_histogram(compute_periodic_distances(pos,indices).unsqueeze(0), bins, computefactor(bins), bandwidth)

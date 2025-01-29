@@ -61,17 +61,27 @@ for conf in tqdm(configurations):
     ti_ti_dist = []
     o_o_dist = []
     ti_o_dist = []
-    for i in range(len(ti_indices)-1):
-        ti_ti_dist.append(repeat.get_distances(ti_indices[i],ti_indices[i+1:],mic=True)) 
-        ti_o_dist.append(repeat.get_distances(ti_indices[i],o_indices,mic=True))
-    for i in range(len(o_indices)-1):
-        o_o_dist.append(repeat.get_distances(o_indices[i],o_indices[i+1:],mic=True)) 
-    ti_ti_dist = np.hstack(ti_ti_dist)
-    o_o_dist = np.hstack(o_o_dist)
-    ti_o_dist = np.hstack(ti_o_dist)
-    ti_ti_rdf = torch_kde_calc(torch.Tensor(ti_ti_dist), bins, bw) # compute kde
-    o_o_rdf = torch_kde_calc(torch.Tensor(o_o_dist), bins, bw) # compute kde
-    ti_o_rdf = torch_kde_calc(torch.Tensor(ti_o_dist), bins, bw) # compute kde
+    if len(ti_indices) > 1:    
+        for i in range(len(ti_indices)-1):
+            ti_ti_dist.append(repeat.get_distances(ti_indices[i],ti_indices[i+1:],mic=True)) 
+            ti_ti_dist = np.hstack(ti_ti_dist)
+            ti_ti_rdf = torch_kde_calc(torch.Tensor(ti_ti_dist), bins, bw) # compute kde
+    else:
+        ti_ti_rdf = torch.zeros(num_bins)
+    if len(o_indices) > 1:    
+        for i in range(len(o_indices)-1):
+            o_o_dist.append(repeat.get_distances(o_indices[i],o_indices[i+1:],mic=True)) 
+            o_o_dist = np.hstack(o_o_dist)
+            o_o_rdf = torch_kde_calc(torch.Tensor(o_o_dist), bins, bw) # compute kde
+    else:
+        o_o_rdf = torch.zeros(num_bins)
+    if len(ti_indices) > 1 and len(o_indices) > 1:    
+        for i in range(len(ti_indices)-1):
+            ti_o_dist.append(repeat.get_distances(ti_indices[i],o_indices,mic=True))
+            ti_o_dist = np.hstack(ti_o_dist)
+            ti_o_rdf = torch_kde_calc(torch.Tensor(ti_o_dist), bins, bw) # compute kde
+    else:
+        ti_o_rdf = torch.zeros(num_bins)
     rdfs_ti_ti.append(ti_ti_rdf.numpy())
     rdfs_o_o.append(o_o_rdf.numpy())
     rdfs_ti_o.append(ti_o_rdf.numpy())

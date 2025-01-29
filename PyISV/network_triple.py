@@ -4,7 +4,7 @@ from torch import nn
 
 class Autoencoder(nn.Module):
     
-    def __init__(self,embed_dim,flat_dim,kernel_size=5): 
+    def __init__(self,embed_dim,flat_dim,kernel_size=5,input_channels=1): 
         super(Autoencoder, self).__init__()
         
         self.kernel_size=5 
@@ -12,9 +12,11 @@ class Autoencoder(nn.Module):
         self.flat_dim=flat_dim
 
         self.embed_dim=embed_dim  
+
+        self.input_channels=input_channels
             
         self.encoder = nn.Sequential(
-            nn.Conv1d(in_channels=3, out_channels=8, kernel_size=self.kernel_size, padding="same"),
+            nn.Conv1d(in_channels=self.input_channels, out_channels=8, kernel_size=self.kernel_size, padding="same"),
             nn.MaxPool1d(kernel_size=2,stride=2),
             nn.ReLU(),
             nn.BatchNorm1d(8),
@@ -80,7 +82,7 @@ class Autoencoder(nn.Module):
             nn.ReLU(),
             nn.BatchNorm1d(8),
             nn.Upsample(scale_factor=2),
-            nn.Conv1d(in_channels=8, out_channels=3, kernel_size=self.kernel_size, padding='same')    
+            nn.Conv1d(in_channels=8, out_channels=self.input_channels, kernel_size=self.kernel_size, padding='same')    
         )
  
 

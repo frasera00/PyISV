@@ -41,11 +41,22 @@ def compute_distances(AtomPos: torch.Tensor) -> torch.Tensor:
     indices = torch.triu_indices((n_atoms),(n_atoms), offset = 1)
     return torch.sqrt(distances[indices[0], indices[1]])
 
-def compute_asepbc_distances(Atoms):
+def compute_asepbc_all_distances(Atoms):
     distances = Atoms.get_all_distances(mic=True)
     n_atoms = len(distances)
     indices = torch.triu_indices((n_atoms),(n_atoms), offset = 1)
     return torch.Tensor(distances[indices[0], indices[1]])
+
+def compute_ase_idx_distances(conf, indices1, indices2=[], mic=False):
+    dist_list = []
+    if indices2 == []:
+        for i in range(len(indices1)-1):
+            dist_list.append(conf.get_distances(indices1[i],indices1[i+1:],mic=mic))
+    else:    
+        for i in range(len(indices1)):
+            dist_list.append(conf.get_distances(indices1[i],indices2,mic=mic))     
+    return np.hstack(dist_list) 
+
 
 def torch_rdf_calc(pos: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
     return normalized_histogram(compute_distances(pos).unsqueeze(0), bins, computefactor(bins), bandwidth)
@@ -53,6 +64,37 @@ def torch_rdf_calc(pos: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tenso
 def torch_kde_calc(values: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
     return normalized_histogram(values.unsqueeze(0), bins, computefactor(bins), bandwidth)
 
+def triple_rdf_calc(specie1, specie2, conf, bins, bw, mic=False):
+    there_is_s1 = False
+    there_is_s2 = False
+   
+    indices_specie1 = [atom.index for atom in conf if atom.symbol == specie1] 
+    indices_specie2 = [atom.index for atom in conf if atom.symbol == specie2]
+    
+    if len(indices_specie1) > 1:
+        there_is_s1 = True
+    if len(indices_specie2) > 1:
+        there_is_s2 = True 
+    
+    num_bins = len(bins)
+    s1_s1_rdf = np.zeros(num_bins)
+    s2_s2_rdf = np.zeros(num_bins)
+    s1_s2_rdf = np.zeros(num_bins)
+
+    if there_is_s1:
+        s1_s1_dist = compute_ase_idx_distances(conf, indices_specie1, indices2=[], mic=mic)
+        s1_s1_rdf = torch_kde_calc(torch.Tensor(s1_s1_dist), bins, bw).numpy()
+
+    if there_is_s2:
+        s2_s2_dist = compute_ase_idx_distances(conf, indices_specie2, indices2=[], mic=mic)
+        s2_s2_rdf = torch_kde_calc(torch.Tensor(s2_s2_dist), bins, bw).numpy()
+
+    if there_is_s1 and there_is_s2:    
+        s1_s2_dist = compute_ase_idx_distances(conf, indices_specie1, indices2=indices_specie2, mic=mic)
+        s1_s2_rdf = torch_kde_calc(torch.Tensor(s1_s2_dist), bins, bw).numpy()        
+    
+    return s1_s1_rdf, s2_s2_rdf, s1_s2_rdf
+
 def ase_periodic_torch_rdf_calc(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
-    return normalized_histogram(compute_asepbc_distances(Atoms).unsqueeze(0), bins, computefactor(bins), bandwidth)
+    return normalized_histogram(compute_asepbc_all_distances(Atoms).unsqueeze(0), bins, computefactor(bins), bandwidth)
 

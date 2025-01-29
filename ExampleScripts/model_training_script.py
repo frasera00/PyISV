@@ -25,7 +25,7 @@ seed = 7352143264209594346 # manual seed for model initialization
 
 # training parameters
 device = 'cpu' # set the device for training
-num_epochs = 100 # number of epochs to perform in the training loop 
+num_epochs = 300 # number of epochs to perform in the training loop 
 saved_model_name = 'best_model' # name of the .pth file where best model is saved during training
 
 #########################
@@ -54,7 +54,10 @@ if save_random_data:
 ####### SETTING UP DATA #######
 ###############################
 
-input_size = input_data.shape[1]
+input_size = input_data.shape[-1]
+num_channels = 1
+if len(input_data.shape)>2:
+    num_channels = input_data.shape[1]
 # switching on the normalization for both inputs and targets 
 norm_inputs = True
 norm_targets = True
@@ -119,7 +122,7 @@ model_kwargs = {
 torch.manual_seed(seed) # set seed if reproducibility required
 model = Autoencoder(**model_kwargs)
 
-_ = summary(model,(1,input_size))
+_ = summary(model,(num_channels,input_size))
 
 ####################################
 ##### TRAINING HYPERPARAMETERS #####
@@ -134,7 +137,7 @@ model.to(device)
 
 # define starting learning rate
 print("[Optimizer Parameters]")
-lrate = 4e-3
+lrate = 5e-3
 print("Learning rate \t=",lrate)
 
 # optimizer
@@ -145,7 +148,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=lrate)
 if (scheduled_lr == True): 
     print ("Scheduler On")
     #lr_scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 25, eta_min=0.00001)
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[70,90], gamma = 0.5)  
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150,250], gamma = 0.5)  
 else:
     print ("Scheduler Off")
     

@@ -50,6 +50,9 @@ def compute_asepbc_distances(Atoms):
 def torch_rdf_calc(pos: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
     return normalized_histogram(compute_distances(pos).unsqueeze(0), bins, computefactor(bins), bandwidth)
 
+def torch_kde_calc(values: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
+    return normalized_histogram(values.unsqueeze(0), bins, computefactor(bins), bandwidth)
+
 def ase_periodic_torch_rdf_calc(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
     return normalized_histogram(compute_asepbc_distances(Atoms).unsqueeze(0), bins, computefactor(bins), bandwidth)
 

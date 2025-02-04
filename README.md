@@ -17,4 +17,10 @@ The repository contain the libraries to train a autoencoder-like neural network,
 
 # Installation
 Clone the repo and install it in your environment using:
-" pip install . " or " pip install -e . " for editable installation 
+" pip install . " or " pip install -e . " for editable installation
+
+# Remarks
+
+The library allows for the training of autoencoder like networks. It offers the chance to compute the input descriptors, in particular RDFs starting from xyz files. Anyhow the proposed neural network architectures are general and input descriptors can be changed or computed with other libraries (like scikit-learn for kde) and the networks will work as they are until the input shapes expected are respected. To ensure the correct input shapes some strategies can be used, like zero padding in order to reach the expected size or reinterpolating the 1D input with tools like offered by scientific libraries like scipy.interpolate.interp1d.
+If this is not feasible, the decoder architecture and its paddings values will need to be adjusted together with flat_dim in order to ensure a proper output size and a correct forwarding of the network.
+Flat_dim is expected to be equal to the size of the final channels of the encoder, since flat_dim times the number of channels of the last encoder layers should match the linear layer size. 

@@ -79,9 +79,9 @@ class Dataset(Dataset):
     def __init__(self, inputs, targets, norm_inputs=False, norm_targets=False, norm_mode="minmax", norm_threshold_inputs=1e-6, norm_threshold_targets=1e-6):
         
         self.num_inputs = inputs.shape[0]    
-        self.num_inputs_features = inputs.shape[1]
+        self.num_inputs_features = inputs.shape[-1]
         self.num_targets = targets.shape[0]    
-        self.num_targets_features = targets.shape[1]
+        self.num_targets_features = targets.shape[-1]
         if (self.num_inputs != self.num_targets):
             print("!!!!! Number of input data not equal to number of targets !!!!!")
         if (self.num_inputs_features != self.num_targets_features):

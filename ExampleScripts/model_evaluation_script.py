@@ -4,6 +4,7 @@ from PyISV.train_utils import Dataset,RMSELoss,MSELoss,SaveBestModel
 from torchsummary import summary
 import numpy as np
 import time
+from tqdm import tqdm
 
 
 ##########################
@@ -26,7 +27,7 @@ path_output_scaler_divval = "./output_scaler_divval.dat"
 
 # model parameters
 embed_dim = 2 # bottleneck size
-flat_dim = 21 # geometric parameter of the network, 21 is needed for input vector of 340 numbers
+flat_dim = 1 # geometric parameter of the network, 21 is needed for input vector of 340 numbers
 device = 'cpu' # set the device for running the model
 
 # evaluation parameter
@@ -55,6 +56,7 @@ else:
 ################################
 
 # path where model and scaler parameters are stored
+
 model_file=model_path
 
 # load scalers parameters 
@@ -65,9 +67,14 @@ output_scaler_subval=np.genfromtxt(path_output_scaler_subval)
 output_scaler_divval=np.genfromtxt(path_output_scaler_divval)
 
 # initialize model class and load the saved checkpoint
+
+num_channels = 1
+if len(input_data.shape)>2:
+    num_channels = input_data.shape[1]
 model_kwargs={
         'embed_dim': embed_dim,
-        'flat_dim': flat_dim
+        'flat_dim': flat_dim,
+        'input_channels': num_channels
          }   
 
 checkpoint = torch.load(model_path,map_location=torch.device(device))
@@ -89,6 +96,8 @@ model.eval()
 # scaling inputs before feeding them to the model
 scaled_input=(input_data-input_scaler_subval)/input_scaler_divval
 scaled_input=torch.Tensor(scaled_input)
+if len(scaled_input.shape)==2:
+    scaled_input = scaled_input.unsqueeze(1)
 
 # in the evaluation to look only at the bottleneck values (the cvs)
 # otherwise, to look also to the reconstructions the full network needs to be forwarded
@@ -97,18 +106,18 @@ embed=[]
 if (run_only_encoder!=True):
     outputs=[]
 t0 = time.time()    
-for sample in scaled_input:
+for sample in tqdm(scaled_input):
     # run only encoder and save only the bottleneck values
     if (run_only_encoder==True):
-        embed.append(model.encode(sample.unsqueeze(0).unsqueeze(0).to(device)).detach().cpu().numpy())
+        embed.append(model.encode(sample.unsqueeze(0).to(device)).detach().cpu().numpy())
     else:
     # run all the network and save outputs and bottleneck values
-        output,embed_val=model(sample.unsqueeze(0).unsqueeze(0).to(device))
+        output,embed_val=model(sample.unsqueeze(0).to(device))
         outputs.append(output.squeeze(0).detach().cpu().numpy())
         embed.append(embed_val.detach().cpu().numpy())
 embed=np.vstack(embed)  
 if (run_only_encoder!=True):
-    outputs=np.vstack(outputs)
+    outputs=np.stack(outputs)
     # outputs need to be scaled back to be compared with the original data
     scaledback_outputs=outputs*output_scaler_divval + output_scaler_subval
 print("Elapsed time for evaluation: {0:.2f} s".format(time.time()-t0))

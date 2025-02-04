@@ -8,7 +8,9 @@ setup(
         'numpy',
         'torch',
         'torchsummary',
-        'scikit-learn'
+        'scikit-learn',
+        'ase',
+        'tqdm'
     ],
     author='Emanuele Telari',
     author_email='telariemanuele@gmail.com',

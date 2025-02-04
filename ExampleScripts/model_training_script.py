@@ -16,16 +16,16 @@ save_random_data=True
 
 # data parameters
 train_fraction = 0.8 # percentage of the data to use for training set
-batch_size = 128 # batch size
+batch_size = 64 # batch size
 
 # model parameters
 embed_dim = 2 # bottleneck size
-flat_dim = 21 # geometric parameter of the network, 21 is needed for input vector of 340 numbers
+flat_dim = 1 # geometric parameter of the network, 21 is needed for input vector of 340 numbers
 seed = 7352143264209594346 # manual seed for model initialization
 
 # training parameters
 device = 'cpu' # set the device for training
-num_epochs = 300 # number of epochs to perform in the training loop 
+num_epochs = 150 # number of epochs to perform in the training loop 
 saved_model_name = 'best_model' # name of the .pth file where best model is saved during training
 
 #########################
@@ -63,13 +63,21 @@ norm_inputs = True
 norm_targets = True
 norm_mode = "minmax" # two types of normalizations implemented 'minmax' and 'gaussian'
 # initializing dataset class
+input_data = torch.tensor(input_data,dtype=torch.double) 
+target_data = torch.tensor(target_data,dtype=torch.double) 
+if len(input_data.shape)==2:
+    input_data = input_data.unsqueeze(1)
+if len(target_data.shape)==2:
+    target_data = target_data.unsqueeze(1)    
+
 dataset = Dataset(
-                torch.tensor(input_data,dtype=torch.double), 
-                torch.tensor(target_data,dtype=torch.double), 
+                input_data,
+                target_data,
                 norm_inputs=norm_inputs, 
                 norm_targets=norm_targets,
                 norm_mode=norm_mode
                 )
+
 # save the normalization parameters for both inputs and targets, in order to be able to scale again new data to feed to the network or scale back the reconstructed outputs
 np.savetxt("input_scaler_subval.dat",dataset.subval_inputs.numpy())
 np.savetxt("input_scaler_divval.dat",dataset.divval_inputs.numpy())
@@ -117,7 +125,8 @@ len(valid_loader)*batch_size,batch_size,len(train_loader),len(valid_loader)))
 
 model_kwargs = {
     'embed_dim': embed_dim,
-    'flat_dim': flat_dim
+    'flat_dim': flat_dim,
+    'input_channels': num_channels
 }
 torch.manual_seed(seed) # set seed if reproducibility required
 model = Autoencoder(**model_kwargs)
@@ -148,7 +157,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=lrate)
 if (scheduled_lr == True): 
     print ("Scheduler On")
     #lr_scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 25, eta_min=0.00001)
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[150,250], gamma = 0.5)  
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[75,125], gamma = 0.5)  
 else:
     print ("Scheduler Off")
     
@@ -203,9 +212,9 @@ for epoch in range(num_epochs):
         x = x.float().to(device)
         y = y.float().to(device)
         # model evaluation
-        output,hidden = model(x.unsqueeze(1))
+        output,hidden = model(x)
         # loss
-        loss=loss_function(output,y.unsqueeze(1))
+        loss=loss_function(output,y)
         train_loss = train_loss + loss.item()
         # backpropagation
         loss.backward()
@@ -225,8 +234,8 @@ for epoch in range(num_epochs):
             counter = counter + 1
             x_valid = x_valid.float().to(device)
             y_valid = y_valid.float().to(device)
-            output_valid,hidden_valid = model(x_valid.unsqueeze(1))
-            vloss=loss_function(output_valid,y_valid.unsqueeze(1))
+            output_valid,hidden_valid = model(x_valid)
+            vloss=loss_function(output_valid,y_valid)
             valid_loss = valid_loss + vloss.item()
 
     valid_loss = valid_loss/counter

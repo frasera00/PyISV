@@ -4,12 +4,14 @@ The repository contain the libraries to train a autoencoder-like neural network,
 
 # Folders
 - PyISV contains the file with the classes and the functions used:
-  - kde_rdf.py: contains the function to compute the RDF from atomic configurations, being RDF defined as the simple histogram of interatomic distances (istogram is computed via KDE)
-  - network.py: contains the network architecture used in https://doi.org/10.48550/arXiv.2407.17924
+  - features_calc_utils.py: contains the function to compute the RDF from atomic configurations, being RDF defined as the simple histogram of interatomic distances (histogram is computed via KDE). More in general it contains functions for KDE estimations.
+  - network_arxiv.py: contains the 1D convolutional network architecture used in https://doi.org/10.48550/arXiv.2407.17924. The architecture is tuned for an input having a single channel of sinze 340 and expect as flat_dim value 21. In case the input size is changed flat_dim and also the paddings of the decoder layers need to be adjusted to get an output of the same size of the input.
+  - network.py: contains an updated 1D convolutional network architecture that seems to offer slightly better performance. This architecture is flexible and can work with inputs with more than one channels. It expect every input channels to be composed by 200 numbers and flat_dim equal to 1. If the input size is changed the decoder padding will need to be adjusted. 
   - train_utils.py: contains additonal classes and functions used in the training of the network
 
-- ExampleScripts: contains example script to run the libraries
-  - rdf_calc_script.py: describe how to compute the RDF (histogram of intertomic distances) using the functions contained in PyISV/kde_rdf.py
+- Scripts: contains example script to run the libraries
+  - compute_single_rdf.py: describe how to compute the RDF (histogram of intertomic distances) using the functions contained in PyISV/features_calc_utils.py. It uses ase package and need xyz format of the trajectories. It will compute the overall rdfs of the structures.
+  - compute_triple_rdf.py: describe how to compute the RDF (histogram of intertomic distances) using the functions contained in PyISV/features_calc_utils.py. It uses ase package and need xyz format of the trajectories. It will compute 3 RDFs. It is thought for binary systems. The elements will need to be specified in order to have ase library to extract the corresponding positions.
   - model_training_script.py: contains the code to train the network
   - model_evaluation_script.py: script to run the trained model and evaluate the bottleneck and reconstructions
 

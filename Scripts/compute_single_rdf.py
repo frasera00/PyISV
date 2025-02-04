@@ -15,8 +15,7 @@ from tqdm import tqdm
 
 
 # load your conf in a list, here ase Atoms objects are needed
-configurations = []
-
+configurations = read('file.xyz')
 
 # distances range and number of bins
 min_dist = 0

@@ -12,9 +12,9 @@ The repository contain the libraries to train a autoencoder-like neural network,
 - Scripts: contains example script to run the libraries
   - compute_single_rdf.py: describe how to compute the RDF (histogram of intertomic distances) using the functions contained in PyISV/features_calc_utils.py. It uses ase package and need xyz format of the trajectories. It will compute the overall rdfs of the structures.
   - compute_triple_rdf.py: describe how to compute the RDF (histogram of intertomic distances) using the functions contained in PyISV/features_calc_utils.py. It uses ase package and need xyz format of the trajectories. It will compute 3 RDFs. It is thought for binary systems. The elements will need to be specified in order to have ase library to extract the corresponding positions.
-  - model_training_script.py: contains the code to train the network
+  - model_training_script.py: contains the code to train the network, contains a routine to generate random data to test the code.
   - model_evaluation_script.py: script to run the trained model and evaluate the bottleneck and reconstructions
 
 # Installation
 Clone the repo and install it in your environment using:
-" pip install . " or " pip install -e . " 
+" pip install . " or " pip install -e . " for editable installation 

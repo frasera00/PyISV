@@ -1,5 +1,5 @@
 import torch
-from PyISV.network import Autoencoder
+from PyISV.network_ret import Autoencoder2D
 from PyISV.train_utils import Dataset,RMSELoss,MSELoss,SaveBestModel
 from torchsummary import summary
 import numpy as np
@@ -15,8 +15,12 @@ from tqdm import tqdm
 # model file path
 model_path = './best_model.pth' # complete path of the saved model, model file included
 input_data_path = 'path_to_data'
-input_dimensionality = 1 # 1 if the input is an array (1D convolutions), 2 if using matrices (2D convolutions)
+input_dimensionality = 2 # 1 if the input is an array (1D convolutions), 2 if using matrices (2D convolutions)
 pure_autoencoder = True # if True the model aims to reproduce the inputs in the output layer
+padding = True
+if padding:
+   padding_final_size = 32
+
 
 # scaler parameters path
 path_input_scaler_subval = "./input_scaler_subval.npy"
@@ -24,15 +28,14 @@ path_input_scaler_divval = "./input_scaler_divval.npy"
 if pure_autoencoder == False:
     path_output_scaler_subval = "./output_scaler_subval.npy"
     path_output_scaler_divval = "./output_scaler_divval.npy"
-
 # model parameters
 embed_dim = 2 # bottleneck size
-flat_dim = 1 # geometric parameter of the network, 21 is needed for input vector of 340 numbers
+flat_dim = 2*2 # geometric parameter of the network, 21 is needed for input vector of 340 numbers
 device = 'cpu' # set the device for running the model
 
 # evaluation parameter
 # if True only encoder will run, otherwise also reconstruction will be saved
-run_only_encoder = True 
+run_only_encoder = False
 
 #########################
 ####### LOAD DATA #######
@@ -42,6 +45,19 @@ run_only_encoder = True
 # if data are RDFs the shape will corresponf to (N_data, N_bins)
 
 input_data = np.load(input_data_path)
+input_size = [*input_data.shape]
+if padding:
+    final_size = padding_final_size
+    padded = []
+    pad_size = final_size - input_size[1]
+    for sample in input_data:
+        padded.append(np.pad(sample, ((pad_size, 0), (pad_size, 0)), mode='constant', constant_values=0))
+    padded = np.stack(padded)  
+    del input_data
+    input_data = np.copy(padded) 
+    input_size = [*input_data.shape]
+    del padded
+
 
 ################################
 ########## LOAD MODEL ##########
@@ -71,13 +87,14 @@ else:
 model_kwargs={
         'embed_dim': embed_dim,
         'flat_dim': flat_dim,
-        'input_channels': num_channels
          }   
+
+print(input_data.shape, input_scaler_divval.shape)
 
 checkpoint = torch.load(model_path,map_location=torch.device(device))
 print('Best model at epoch: ', checkpoint['epoch'])
 
-model = Autoencoder(**model_kwargs)
+model = Autoencoder2D(**model_kwargs)
 model.load_state_dict(checkpoint['model_state_dict'])
 # set the device (cpu or cuda)
 model.to(device)
@@ -118,6 +135,7 @@ if (run_only_encoder!=True):
     scaledback_outputs=outputs*output_scaler_divval + output_scaler_subval
 print("Elapsed time for evaluation: {0:.2f} s".format(time.time()-t0))
 np.save("embed.npy",embed)
+print(scaledback_outputs.shape)
 if (run_only_encoder!=True):
     np.save("rescaled_outputs.npy",scaledback_outputs)
 

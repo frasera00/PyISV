@@ -82,11 +82,6 @@ class Dataset(Dataset):
         self.num_inputs_features = inputs.shape[-1]
         self.num_targets = targets.shape[0]    
         self.num_targets_features = targets.shape[-1]
-        if (self.num_inputs != self.num_targets):
-            print("!!!!! Number of input data not equal to number of targets !!!!!")
-        if (self.num_inputs_features != self.num_targets_features):
-            print("!!!!! Number of features of the input data not equal to number of features of the targets !!!!!")
-            
         
         self.inputs = inputs
         self.targets = targets
@@ -152,19 +147,24 @@ class Dataset(Dataset):
 
 class SaveBestModel():
     # see: https://pytorch.org/tutorials/beginner/saving_loading_models.html
-    def __init__(self, best_valid_loss=float('inf'), best_model_name="best_model"): 
+    def __init__(self, best_valid_loss=float('inf'), best_train_loss=float('inf'), best_model_name="best_model"): 
         self.best_valid_loss = best_valid_loss
+        self.best_train_loss = best_train_loss
         self.best_model_name = best_model_name
         self.best_epoch = None
-    def __call__(self, current_valid_loss, epoch, model, optimizer):
+    
+    def __call__(self, current_valid_loss, current_train_loss, epoch, model, optimizer):
         if current_valid_loss < self.best_valid_loss:
             self.best_valid_loss = current_valid_loss
+            self.best_train_loss = current_train_loss
             self.best_epoch = epoch
             print(f"  Saving best model at epoch: {epoch}, Best validation loss: {self.best_valid_loss}")
             torch.save({
                 'epoch': self.best_epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'best_valid_loss': self.best_valid_loss,
+                'best_train_loss': self.best_train_loss
                 }, self.best_model_name+'.pth')
 
 class EarlyStopping:

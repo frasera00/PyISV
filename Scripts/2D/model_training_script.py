@@ -18,14 +18,26 @@ embed_dim = 2 # bottleneck size
 flat_dim = 2*2 # geometric parameter of the network, 21 is needed for input vector of 340 numbers
 seed = 7352143264209594346 # manual seed for model initialization
 
+# network training scheme
+pure_autoencoder = True # True if input and targets are the same
 # training parameters
+input_dimensionality = 2 # 1 if the input is an array (1D convolutions), 2 if using matrices (2D convolutions)
+
 device = 'cpu' # set the device for training
-num_epochs = 250 # number of epochs to perform in the training loop 
+min_num_epochs = 75 # number of minimum epochs to perform in the training loop
+max_num_epochs = 250 # number of maximum epochs to perform in the training loop 
 saved_model_name = 'best_model' # name of the .pth file where best model is saved during training
 stopper_patience = 10 # early stopping patience
-stopper_delta = 0.0005 # early stopping delta
-input_path = 'path_to_data' # path to input data, include name of the file
-padding = True # turn on the padding to match input size of the network
+stopper_delta = 0.05 # early stopping delta
+input_path = 'path_to_inputs'
+if pure_autoencoder == False:
+   target_path = 'path_to_targets'
+norm_mode = "minmax" # normalization mode, "gaussian" or "minmax" are the only ones implemented
+padding = True
+if padding:
+   padding_final_size = 32
+
+
 
 with open("train_log.txt", "w") as log:
     log.write("### LOGGING TRAINING INFO ###\n\n")
@@ -35,14 +47,18 @@ Embedding dimension = {embed_dim}
 Flat dimension = {flat_dim}
 Seed = {seed}
 
+[Training Mode]
+Pure autoencoder = {pure_autoencoder}
+
 [Training Parameters]
 Device = {device}
-Maximum number of epochs = {num_epochs}
+Minimum number of epochs = {min_num_epochs}
+Maximum number of epochs = {max_num_epochs}
 Saved model name = {saved_model_name}
 Early stopping patience = {stopper_patience}
 Early stopping delta = {stopper_delta}
 Input path = {input_path}
-Padded input = {padding}
+Input normalization = {norm_mode}
 Fraction of data for the training set = {train_fraction}
 Batch size = {batch_size}
 
@@ -51,34 +67,64 @@ Batch size = {batch_size}
 
 
 input_data = np.load(input_path)
-target_data = np.zeros((len(input_data),3))
-input_size = [input_data.shape[1],input_data.shape[2]]
+if pure_autoencoder == False:
+    target_data = np.load(target_path)
+else:
+    target_data = np.zeros((len(input_data),3))
+input_size = [*input_data.shape]
 with open("train_log.txt", "a") as log:
     log.write(f"LOADING DATA\n")
     log.write(f"Input size: {input_size}\n")
-num_channels = 1
 
 if padding:
+    final_size = padding_final_size
     with open("train_log.txt", "a") as log:
         log.write("Padding on!\n")
     padded = []
-    target_shape = 32
-    pad_size = target_shape - input_size[0]
+    pad_size = final_size - input_size[1]
     for sample in input_data:
         padded.append(np.pad(sample, ((pad_size, 0), (pad_size, 0)), mode='constant', constant_values=0))
     padded = np.stack(padded)  
     del input_data
     input_data = np.copy(padded) 
-    input_size = [input_data.shape[1],input_data.shape[2]]
+    input_size = [*input_data.shape]
     with open("train_log.txt", "a") as log:
         log.write(f"Padded input size: {input_size}\n")
     del padded
+    if pure_autoencoder == False:
+        padded = []
+        pad_size = final_size - input_size[1]
+        for sample in target_data:
+            padded.append(np.pad(sample, ((pad_size, 0), (pad_size, 0)), mode='constant', constant_values=0))
+        padded = np.stack(padded)  
+        del target_data
+        target_data = np.copy(padded) 
+        target_size = [target_data.shape[1],target_data.shape[2]]
+        with open("train_log.txt", "a") as log:
+            log.write(f"Padded target size: {target_size}\n")
+        del padded
+
+
+
+
 
 norm_inputs = True
 norm_targets = True
-norm_mode = "minmax" # two types of normalizations implemented 'minmax' and 'gaussian'
+norm_mode = norm_mode 
 # initializing dataset class
-dataset = Dataset(
+num_channels = 1
+if len(input_data.shape) > input_dimensionality+1:
+    num_channels = input_data.shape[1]
+if num_channels == 1:
+    dataset = Dataset(
+                torch.tensor(input_data,dtype=torch.double).unsqueeze(1), 
+                torch.tensor(target_data,dtype=torch.double).unsqueeze(1), 
+                norm_inputs=norm_inputs, 
+                norm_targets=norm_targets,
+                norm_mode=norm_mode
+                )
+else:
+    dataset = Dataset(
                 torch.tensor(input_data,dtype=torch.double), 
                 torch.tensor(target_data,dtype=torch.double), 
                 norm_inputs=norm_inputs, 
@@ -86,10 +132,11 @@ dataset = Dataset(
                 norm_mode=norm_mode
                 )
 # save the normalization parameters for both inputs and targets, in order to be able to scale again new data to feed to the network or scale back the reconstructed outputs
-np.savetxt("input_scaler_subval.dat",dataset.subval_inputs.numpy())
-np.savetxt("input_scaler_divval.dat",dataset.divval_inputs.numpy())
-#np.savetxt("output_scaler_subval.dat",dataset.subval_targets.numpy())
-#np.savetxt("output_scaler_divval.dat",dataset.divval_targets.numpy())
+np.save("input_scaler_subval.npy",dataset.subval_inputs.numpy())
+np.save("input_scaler_divval.npy",dataset.divval_inputs.numpy())
+if pure_autoencoder == False:
+    np.save("output_scaler_subval.npy",dataset.subval_targets.numpy())
+    np.save("output_scaler_divval.npy",dataset.divval_targets.numpy())
 
 del input_data
 del target_data
@@ -136,7 +183,6 @@ Validation batches = {5:d}
 len(valid_loader)*batch_size,batch_size,len(train_loader),len(valid_loader))) 
 
 
-num_channels = 1
 model_kwargs = {
     'embed_dim': embed_dim,
     'flat_dim': flat_dim
@@ -144,7 +190,9 @@ model_kwargs = {
 torch.manual_seed(seed) # set seed if reproducibility required
 model = Autoencoder2D(**model_kwargs)
 model.to(device)
-_ = summary(model,(num_channels,input_size[0],input_size[1]))
+print(input_size)
+
+_ = summary(model,(num_channels, input_size[-2], input_size[-1]))
 
 
 
@@ -194,8 +242,6 @@ hist_valid = []
 learn_rate = []
 
 
-num_epochs=num_epochs
-
 with open("train_log.txt", "a") as log:
     log.write("\nPrinting training stat in train_stats.txt\n")
 # initializing class to save best model during training
@@ -207,7 +253,7 @@ with open("train_stats.txt", "w") as f:
     f.write(train_log)
 
 # training loop
-for epoch in range(num_epochs):
+for epoch in range(max_num_epochs):
     t0 = time.time()
     
     # set up the model for training and weights updating
@@ -221,9 +267,12 @@ for epoch in range(num_epochs):
         x = x.float().to(device)
         y = y.float().to(device)
         # model evaluation
-        output,hidden = model(x.unsqueeze(1))
+        output,hidden = model(x)
         # loss
-        loss=loss_function(output,x.unsqueeze(1))
+        if pure_autoencoder:
+            loss=loss_function(output,x)
+        else:
+            loss=loss_function(output,y)
         train_loss = train_loss + loss.item()
         # backpropagation
         loss.backward()
@@ -243,27 +292,32 @@ for epoch in range(num_epochs):
             counter = counter + 1
             x_valid = x_valid.float().to(device)
             y_valid = y_valid.float().to(device)
-            output_valid,hidden_valid = model(x_valid.unsqueeze(1))
-            vloss=loss_function(output_valid,x_valid.unsqueeze(1))
+            output_valid,hidden_valid = model(x_valid)
+            if pure_autoencoder:
+                vloss=loss_function(output_valid,x_valid)
+            else:
+                vloss=loss_function(output_valid,y_valid)
             valid_loss = valid_loss + vloss.item()
 
     valid_loss = valid_loss/counter
     hist_valid.append(valid_loss)
 
     # call SaveBestModel to compare the iteration result with the previous saved model
-    save_best_model(valid_loss, init_epoch+epoch, model, optimizer)
-    if early_stopping(valid_loss):
-        print(f"Early stopping at epoch {epoch}")
-        with open("train_stats.txt", "a") as f:
-            f.write(f"Early stopping at epoch {epoch}\n")
-        with open("train_log.txt", "a") as log:
-            log.write(f"###################\n")
-            log.write(f"\n")
-            log.write(f"Training completed!\n")
-            log.write(f"Early stopping at epoch {epoch}\n")
-            log.write(f"Last saved model at epoch: {save_best_model.best_epoch}\n")
-            log.write(f"Best validation loss: {save_best_model.best_valid_loss}\n")
-        break
+    save_best_model(valid_loss, train_loss, init_epoch+epoch, model, optimizer)
+    if epoch >= min_num_epochs: # check early stopping after the minimum number of epochs
+        if early_stopping(valid_loss):
+            print(f"Early stopping at epoch {epoch}")
+            with open("train_stats.txt", "a") as f:
+                f.write(f"Early stopping at epoch {epoch}\n")
+            with open("train_log.txt", "a") as log:
+                log.write(f"###################\n")
+                log.write(f"\n")
+                log.write(f"Training completed!\n")
+                log.write(f"Early stopping at epoch {epoch}\n")
+                log.write(f"Last saved model at epoch: {save_best_model.best_epoch}\n")
+                log.write(f"Best validation loss: {save_best_model.best_valid_loss}\n")
+                log.write(f"Best training loss: {save_best_model.best_train_loss}\n")
+            break
 
     # update lr following the scheduler
     if (scheduled_lr == True):
@@ -277,11 +331,10 @@ for epoch in range(num_epochs):
     # append data to plot
     # print training stats to file
     train_log="{0:d} {1:.2f} {2:.9f} {3:9f} {4:1.2e}".format(init_epoch+epoch, elapsed_time, train_loss, valid_loss, current_lr)
-    #log=np.array([init_epoch+epoch+1, elapsed_time, train_loss, valid_loss, current_lr]).reshape(1,-1)
     with open("train_stats.txt", "a") as f:
         f.write(train_log+'\n')
 
-if (epoch == num_epochs-1):
+if (epoch == max_num_epochs-1):
    with open("train_log.txt", "a") as log:
        log.write(f"###################\n")
        log.write(f"\n")
@@ -289,3 +342,4 @@ if (epoch == num_epochs-1):
        log.write(f"!!! No early stopping !!!\n")
        log.write(f"Last saved model at epoch: {save_best_model.best_epoch}\n")
        log.write(f"Best validation loss: {save_best_model.best_valid_loss}\n")
+       log.write(f"Best training loss: {save_best_model.best_train_loss}\n")

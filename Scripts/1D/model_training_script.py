@@ -52,7 +52,7 @@ Batch size = {batch_size}
 
 input_data = np.load(input_path)
 target_data = np.zeros((len(input_data),3))
-input_size = [input_data.shape[1],input_data.shape[2]]
+input_size = [input_data.shape[0],input_data.shape[1]]
 with open("train_log.txt", "a") as log:
     log.write(f"LOADING DATA\n")
     log.write(f"Input size: {input_size}\n")

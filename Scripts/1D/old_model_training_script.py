@@ -11,8 +11,6 @@ import time
 ####### PARAMETERS #######
 ##########################
 
-# set to True testing the script with random data and you wish to save them for evaluation
-save_random_data=True
 
 # data parameters
 train_fraction = 0.8 # percentage of the data to use for training set
@@ -25,7 +23,7 @@ seed = 7352143264209594346 # manual seed for model initialization
 
 # training parameters
 device = 'cpu' # set the device for training
-num_epochs = 150 # number of epochs to perform in the training loop 
+num_epochs = 250 # number of epochs to perform in the training loop 
 saved_model_name = 'best_model' # name of the .pth file where best model is saved during training
 
 #########################
@@ -77,7 +75,8 @@ dataset = Dataset(
                 norm_targets=norm_targets,
                 norm_mode=norm_mode
                 )
-
+del input_data
+del target_data
 # save the normalization parameters for both inputs and targets, in order to be able to scale again new data to feed to the network or scale back the reconstructed outputs
 np.savetxt("input_scaler_subval.dat",dataset.subval_inputs.numpy())
 np.savetxt("input_scaler_divval.dat",dataset.divval_inputs.numpy())
@@ -103,9 +102,13 @@ batch_size = batch_size
 
 train_dataset=Dataset(X_train, Y_train, norm_inputs=False, norm_targets=False)
 train_loader=DataLoader(train_dataset, shuffle=True, batch_size=batch_size, drop_last=True)
+del X_train
+del Y_train
 
 valid_dataset=Dataset(X_valid, Y_valid, norm_inputs=False, norm_targets=False)
 valid_loader=DataLoader(valid_dataset, shuffle=True, batch_size=batch_size, drop_last=True)
+del X_valid
+del Y_valid
 
 print('''SHUFFLING TRAINING AND VALIDATION DATASETS AND CREATING BATCHES")
 ###################################

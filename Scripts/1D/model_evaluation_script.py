@@ -95,6 +95,7 @@ model.eval()
 
 # scaling inputs before feeding them to the model
 scaled_input=(input_data-input_scaler_subval)/input_scaler_divval
+del input_data
 scaled_input=torch.Tensor(scaled_input)
 if len(scaled_input.shape)==2:
     scaled_input = scaled_input.unsqueeze(1)

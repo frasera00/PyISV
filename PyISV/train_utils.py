@@ -155,13 +155,35 @@ class SaveBestModel():
     def __init__(self, best_valid_loss=float('inf'), best_model_name="best_model"): 
         self.best_valid_loss = best_valid_loss
         self.best_model_name = best_model_name
-
+        self.best_epoch = None
     def __call__(self, current_valid_loss, epoch, model, optimizer):
         if current_valid_loss < self.best_valid_loss:
             self.best_valid_loss = current_valid_loss
-            print(f"  Saving best model for epoch: {epoch+1}, Best validation loss: {self.best_valid_loss}")
+            self.best_epoch = epoch
+            print(f"  Saving best model at epoch: {epoch}, Best validation loss: {self.best_valid_loss}")
             torch.save({
-                'epoch': epoch+1,
+                'epoch': self.best_epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 }, self.best_model_name+'.pth')
+
+class EarlyStopping:
+    def __init__(self, patience=10, min_delta=0.001):
+        """
+        Args:
+            patience (int): How many epochs to wait before stopping when loss stops improving.
+            min_delta (float): Minimum change in the monitored metric to qualify as an improvement.
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = float('inf')
+        self.counter = 0
+
+    def __call__(self, loss):
+        if loss < self.best_loss - self.min_delta:
+            self.best_loss = loss
+            self.counter = 0  # Reset counter if improvement
+        else:
+            self.counter += 1  # Increment counter if no improvement
+
+        return self.counter >= self.patience

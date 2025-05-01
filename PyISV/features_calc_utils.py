@@ -2,9 +2,9 @@ import numpy as np
 from typing import Tuple
 import torch
 
-#################################################
-############ ASE-TORCH KDE RDF FUNCTIONS ############
-#################################################
+#-----------------------------------------
+# ASE-TORCH KDE RDF FUNCTIONS 
+#-----------------------------------------
 
 @torch.jit.script
 def marginal_pdf(

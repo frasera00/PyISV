@@ -13,3 +13,7 @@ wheels/
 *.out
 *.xyz
 *.log
+
+*.DStore
+
+run_mono.sh

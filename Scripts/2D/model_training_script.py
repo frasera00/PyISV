@@ -9,7 +9,6 @@ import time
 import matplotlib.pyplot as plt
 
 
-
 train_fraction = 0.8 # percentage of the data to use for training set
 batch_size = 64 # batch size
 
@@ -240,7 +239,6 @@ if (Loss_type=="MSE"):
 hist_train = []
 hist_valid = []
 learn_rate = []
-
 
 with open("train_log.txt", "a") as log:
     log.write("\nPrinting training stat in train_stats.txt\n")

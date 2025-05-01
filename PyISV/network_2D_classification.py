@@ -6,7 +6,7 @@ class Classifier2D(nn.Module):
     """
     14-way classifier reusing the Autoencoder2D encoder.
     """
-    def __init__(self, embed_dim, flat_dim, num_classes=14, num_encoder_final_channels=16):
+    def __init__(self, embed_dim, flat_dim, num_classes=6, num_encoder_final_channels=16):
 
         super(Classifier2D, self).__init__()
         # Reuse only the encoder portion

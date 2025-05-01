@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class Classifier1D(nn.Module):
+class Classifier(nn.Module):
     """
     Fully self-contained 1D classifier using a CNN encoder and classification head.
     Expects input shape: [batch_size, 1, sequence_length]

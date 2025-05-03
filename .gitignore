@@ -25,6 +25,6 @@ wheels/
 *.xyz
 *.log
 
-*.DStore
+*.DS_Store
 
 run_mono.sh

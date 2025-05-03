@@ -1,8 +1,9 @@
 # Python-generated files
-__pycache__/
+*__pycache__*
 *.pyc
 *.pyo
 *.py[oc]
+
 
 # Ignore data files
 *.pt
@@ -25,6 +26,8 @@ wheels/
 *.xyz
 *.log
 
+# Ignore macOS system files
 *.DS_Store
 
+# Ignore scripts to run in clusters:
 run_mono.sh

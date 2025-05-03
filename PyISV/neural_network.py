@@ -14,6 +14,7 @@ class NeuralNetwork(nn.Module):
                  activation_fn=nn.ReLU, use_pooling=True):
         super(NeuralNetwork, self).__init__()
 
+        self.device = torch.device('cpu')  # Default to CPU; can be updated during training
         self.model_type = model_type
         self.embed_dim = embed_dim
         self.num_classes = num_classes
@@ -27,7 +28,12 @@ class NeuralNetwork(nn.Module):
         self.flat_dim = input_shape[1] // (2 ** len(encoder_channels))
 
         if self.model_type == "autoencoder":
-            self.encoder = build_encoder(input_shape[0], input_shape[1], encoder_channels, activation_fn)
+            self.encoder = build_encoder(
+                input_shape[0],  # input_channels
+                input_shape[1],  # input_length
+                encoder_channels,  # encoder_channels
+                activation_fn  # activation_fn
+            )
             self.bottleneck = build_bottleneck(
                 flat_dim=self.flat_dim,  # Use flat_dim attribute
                 embed_dim=embed_dim,
@@ -39,7 +45,12 @@ class NeuralNetwork(nn.Module):
                 output_length=input_shape[1]  # Pass the original input length to the decoder
             )
         elif self.model_type == "classifier":
-            self.encoder = build_encoder(input_shape, encoder_channels, self.num_encoder_final_channels, activation_fn, use_pooling)
+            self.encoder = build_encoder(
+                input_shape[0],  # input_channels
+                input_shape[1],  # input_length
+                encoder_channels,  # encoder_channels
+                activation_fn  # activation_fn
+            )
             self.classification_head = build_classification_head(self.encoder, input_shape, embed_dim, num_classes, activation_fn)
         else:
             raise ValueError("Invalid model_type. Choose from 'autoencoder' or 'classifier'.")

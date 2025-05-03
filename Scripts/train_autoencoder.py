@@ -7,9 +7,9 @@ import yaml
 import logging
 import torch.utils.bottleneck
 
-# Load configuration
-with open("config.yaml", "r") as config_file:
-    config = yaml.safe_load(config_file)
+# Load the autoencoder-specific configuration file
+with open("config_autoencoder.yaml", "r") as file:
+    config = yaml.safe_load(file)
 
 # Setup logging
 log_file = config["output"]["log_file"]
@@ -35,8 +35,8 @@ early_stopping_config = training_config["early_stopping"]
 
 # Data settings
 data_config = config["input"]
-input_data_path = data_config["autoencoder"]["path"]
-target_data_path = data_config["autoencoder"]["target_path"]
+input_data_path = data_config["path"]
+target_data_path = data_config["target_path"]
 
 # Load input data
 input_data = torch.load(input_data_path).float()
@@ -54,7 +54,7 @@ dataset = Dataset(
     target_data,  # Autoencoder uses input as target
     norm_inputs=True,
     norm_targets=True,
-    norm_mode=data_config["autoencoder"].get("normalization", "minmax")
+    norm_mode=data_config.get("normalization", "minmax")
 )
 
 # Save normalization parameters

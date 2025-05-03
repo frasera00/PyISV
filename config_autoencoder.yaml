@@ -1,4 +1,4 @@
-# Configuration file for PyISV
+# Configuration file for PyISV - Autoencoder
 
 # General settings
 device: "cpu"  # Options: "cuda", "cpu"
@@ -8,10 +8,10 @@ seed: 42
 model:
   type: "autoencoder"  # Options: "autoencoder", "classifier"
   input_shape: [1, 200]  # [Number of channels, Length]
-  encoder_channels: [8, 16, 32, 32] #[8, 16, 32, 64, 64, 128, 128]
-  decoder_channels: [32, 32, 16, 8] #[128, 64, 64, 32, 16, 8]
+  encoder_channels: [8, 16, 32, 32]
+  decoder_channels: [32, 32, 16, 8]
   activation_fn: "ReLU"
-  embed_dim: 2
+  embed_dim: 3
 
 # Training settings
 training:
@@ -26,21 +26,13 @@ training:
   loss: "MSE"  # Options: "MSE", "RMSE"
 
 # Data settings
-# Autoencoder-specific settings
 input:
-  autoencoder:
-    path: "data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
-    target_path: null  # Autoencoder uses the same input as target
-    normalization: "minmax"  # Options: "minmax", "gaussian"
-    padding:
-      enabled: false
-      final_size: 32
-
-# Classification-specific settings
-  classification:
-    path: "data/Ag38_labels/combined_isv_labels_2D_nonMin_to_min_k15_nCu_0.txt"  # Path for the input dataset for classification
-    target_path: null  # Classification typically uses labels, so no target dataset is needed
-    normalization: "gaussian"  # Options: "minmax", "gaussian"
+  path: "data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
+  target_path: null  # Autoencoder uses the same input as target
+  normalization: "minmax"  # Options: "minmax", "gaussian"
+  padding:
+    enabled: false
+    final_size: 32
 
 # Output settings
 output:

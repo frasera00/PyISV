@@ -1,50 +1,53 @@
 #!/usr/bin/env python3
 import os
+import numpy as np
+import torch
 import logging  # Import the logging module
 
-from PyISV.features_calc_utils import compute_rdfs_and_save
+from PyISV.features_calc_utils import build_rdf
 
+# Define global constants for testing purposes
+XYZ_PATH = "./data/structures/full_min_ptmd_m18_nCu_0.xyz"
+LABEL_FILE = "./data/Ag38_labels/combined_isv_labels_2D_nonMin_to_min_k15_nCu_0.txt"
+OUTPUT_DIR = "./data/RDFs"
+MIN_DIST = 1.0
+MAX_DIST = 8.0
+N_BINS = 200
+BANDWIDTH = 0.2
+FRACTION = 1.0
 
-def setup_logging(output_path):
+def setup_logging(log_file):
     """
     Setup the logging configuration.
     """
-    log_file = os.path.join(output_path, "rdf_computation.log")
     logging.basicConfig(filename=log_file, level=logging.INFO, 
                         format='%(asctime)s - %(levelname)s - %(message)s')
     return log_file
 
 
 if __name__ == "__main__":
-    # — user config —
-    XYZ_PATH    = "./structures/full_min_ptmd_m18_nCu_0.xyz"
-    LABEL_FILE  = "./Ag38_labels/combined_isv_labels_2D_nonMin_to_min_k15_nCu_0.txt"
-    OUTPUT_DIR  = "./RDFs"
-
-    MIN_DIST    = 1.0       # Minimum distance for RDF calculation (in Angstroms)
-    MAX_DIST    = 8.0       # Maximum distance for RDF calculation (in Angstroms)
-    N_BINS      = 200       # Number of bins for the histogram
-    BANDWIDTH   = 0.2       # Bandwidth for KDE (in Angstroms)
-
-    FRACTION    = 1.0       # Fraction of frames to use for RDF calculation (1.0 = all frames)
-    PERIODIC    = False     # Set to True for periodic boundary conditions
-    REPLICATE   = (2, 2, 2) # Optional, only used if periodic=True
-    
     # Set up logging
-    log_file = setup_logging(OUTPUT_DIR)
+    log_file = setup_logging("./logs/rdf_computation.log")
 
     # Run the RDF computation
-    compute_rdfs_and_save(
+    build_rdf(
         xyz_path=XYZ_PATH,
-        label_file=LABEL_FILE,
         min_dist=MIN_DIST,
         max_dist=MAX_DIST,
         n_bins=N_BINS,
         bandwidth=BANDWIDTH,
         output_path=OUTPUT_DIR,
         fraction=FRACTION,
-        periodic=PERIODIC,
-        replicate=REPLICATE,
     )
 
+    # Generate labels torch file
+    label_file = LABEL_FILE
+    output_path=OUTPUT_DIR
+
+    labels = torch.LongTensor(np.loadtxt(label_file, dtype=int))
+    label_path = os.path.join(output_path, "labels.pt")
+    torch.save(labels, label_path)
+
     print(f"Log saved to: {log_file}")
+    logging.info(f"Saved labels to {label_path}")
+

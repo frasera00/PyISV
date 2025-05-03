@@ -1,7 +1,7 @@
 import torch
 
 def inspect_data():
-    labels_path = "data/RDFs/labels.pt"
+    labels_path = "data/Ag38_labels/labels.pt"
     rdf_images_path = "data/RDFs/rdf_images.pt"
 
     try:

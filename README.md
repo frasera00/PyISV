@@ -1,26 +1,68 @@
-### PyISV repo
+# PyISV: Autoencoder-Based Neural Network for Atomic Configurations
 
-The repository contain the libraries to train a autoencoder-like neural network, used and described in the work https://doi.org/10.48550/arXiv.2407.17924 and https://doi.org/10.1021/acsnano.3c05653
+PyISV is a Python library designed for training autoencoder-like neural networks to analyze atomic configurations. It includes tools for computing Radial Distribution Functions (RDFs) and provides flexible neural network architectures for various input descriptors. This library is used and described in the following works:
 
-# Folders
-- PyISV contains the file with the classes and the functions used:
-  - features_calc_utils.py: contains the function to compute the RDF from atomic configurations, being RDF defined as the simple histogram of interatomic distances (histogram is computed via KDE). More in general it contains functions for KDE estimations.
-  - network_arxiv.py: contains the 1D convolutional network architecture used in https://doi.org/10.48550/arXiv.2407.17924. The architecture is tuned for an input having a single channel of sinze 340 and expect as flat_dim value 21. In case the input size is changed flat_dim and also the paddings of the decoder layers need to be adjusted to get an output of the same size of the input.
-  - network.py: contains an updated 1D convolutional network architecture that seems to offer slightly better performance. This architecture is flexible and can work with inputs with more than one channels. It expect every input channels to be composed by 200 numbers and flat_dim equal to 1. If the input size is changed the decoder padding will need to be adjusted. 
-  - train_utils.py: contains additonal classes and functions used in the training of the network
+- [DOI: 10.48550/arXiv.2407.17924](https://doi.org/10.48550/arXiv.2407.17924)
+- [DOI: 10.1021/acsnano.3c05653](https://doi.org/10.1021/acsnano.3c05653)
 
-- Scripts: contains example script to run the libraries
-  - compute_single_rdf.py: describe how to compute the RDF (histogram of intertomic distances) using the functions contained in PyISV/features_calc_utils.py. It uses ase package and need xyz format of the trajectories. It will compute the overall rdfs of the structures.
-  - compute_triple_rdf.py: describe how to compute the RDF (histogram of intertomic distances) using the functions contained in PyISV/features_calc_utils.py. It uses ase package and need xyz format of the trajectories. It will compute 3 RDFs. It is thought for binary systems. The elements will need to be specified in order to have ase library to extract the corresponding positions.
-  - model_training_script.py: contains the code to train the network, contains a routine to generate random data to test the code.
-  - model_evaluation_script.py: script to run the trained model and evaluate the bottleneck and reconstructions
+## Features
+- Compute RDFs from atomic configurations using Kernel Density Estimation (KDE).
+- Train autoencoder-like neural networks with flexible architectures.
+- Evaluate trained models for bottleneck and reconstruction performance.
 
-# Installation
-Clone the repo and install it in your environment using:
-" pip install . " or " pip install -e . " for editable installation
+## Updated Folder Structure
 
-# Remarks
+### PyISV
+Contains the core library files for the project.
 
-The library allows for the training of autoencoder like networks. It offers the chance to compute the input descriptors, in particular RDFs starting from xyz files. Anyhow the proposed neural network architectures are general and input descriptors can be changed or computed with other libraries (like scikit-learn for kde) and the networks will work as they are until the input shapes expected are respected. To ensure the correct input shapes some strategies can be used, like zero padding in order to reach the expected size or reinterpolating the 1D input with tools like offered by scientific libraries like scipy.interpolate.interp1d.
-If this is not feasible, the decoder architecture and its paddings values will need to be adjusted together with flat_dim in order to ensure a proper output size and a correct forwarding of the network.
-Flat_dim is expected to be equal to the size of the final channels of the encoder, since flat_dim times the number of channels of the last encoder layers should match the linear layer size. 
+### scripts
+Contains Python scripts for generating RDFs, training models, and evaluating models.
+
+### notebooks
+Contains Jupyter notebooks for interactive exploration and predictions.
+
+### data
+Stores datasets, predictions, and RDF-related data.
+
+### tests
+Contains unit tests for the library.
+
+### models
+Stores pre-trained models, such as `classifier_best.pt`.
+
+## Installation
+Clone the repository and install it in your Python environment:
+
+```bash
+pip install .
+```
+
+For editable installation:
+
+```bash
+pip install -e .
+```
+
+## Getting Started
+1. Install the library as described above.
+2. Use the example scripts in the `scripts/` folder to compute RDFs or train models.
+3. Refer to the `PyISV` folder for detailed implementations of the library's features.
+
+## Updated Usage Example
+
+Here is an example of how to compute RDFs using the reorganized structure:
+
+```python
+from PyISV.features_calc_utils import compute_single_rdf
+
+# Example usage
+rdf = compute_single_rdf("data/Ag38_labels/isv_coords_2D_nonMin_to_min_nCu_0.txt")
+print(rdf)
+```
+
+For more examples, refer to the `scripts/` directory or the Jupyter notebooks in the `notebooks/` directory.
+
+## Remarks
+The library allows for the training of autoencoder-like networks and the computation of input descriptors (e.g., RDFs). While the proposed neural network architectures are general, input descriptors can be customized. Ensure that input shapes match the expected dimensions by using strategies like zero-padding or interpolation.
+
+For more details, refer to the source code and the referenced publications.

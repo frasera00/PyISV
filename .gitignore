@@ -1,6 +1,14 @@
 # Python-generated files
 __pycache__/
+*.pyc
+*.pyo
 *.py[oc]
+
+# Ignore data files
+*.pt
+*.csv
+
+# Ignore build artifacts
 build/
 dist/
 wheels/
@@ -8,6 +16,9 @@ wheels/
 
 # Virtual environments
 .*venv*
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
 
 # Atoms output
 *.out

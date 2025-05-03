@@ -1,0 +1,16 @@
+2025-05-03 12:39:24,473 - INFO - Epoch 1/1, Loss: 12.4414
+2025-05-03 12:39:38,231 - INFO - Validation Loss: 0.7601
+2025-05-03 12:39:38,262 - INFO - Training completed.
+2025-05-03 12:39:39,101 - INFO - Traced model saved to traced_model.pt
+2025-05-03 12:41:41,093 - INFO - Epoch 1/1, Loss: 12.4414
+2025-05-03 12:41:54,145 - INFO - Validation Loss: 0.7601
+2025-05-03 12:41:54,168 - INFO - Training completed.
+2025-05-03 12:41:54,782 - INFO - Traced model saved to traced_model.pt
+2025-05-03 13:17:04,466 - INFO - Epoch 1/1, Loss: 15.2674
+2025-05-03 13:17:09,874 - INFO - Validation Loss: 0.6582
+2025-05-03 13:17:09,923 - INFO - Training completed.
+2025-05-03 13:17:10,814 - INFO - Traced model saved to traced_model.pt
+2025-05-03 13:18:39,202 - INFO - Epoch 1/1, Loss: 15.2674
+2025-05-03 13:18:45,058 - INFO - Validation Loss: 0.6582
+2025-05-03 13:18:45,078 - INFO - Training completed.
+2025-05-03 13:18:45,475 - INFO - Traced model saved to traced_model.pt

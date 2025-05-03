@@ -2,59 +2,6 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
-class ClassificationTrainer:
-    """
-    Trainer for supervised classification using CrossEntropyLoss.
-    Implements a clean and efficient training/validation loop.
-    """
-    def __init__(self, model, train_loader, val_loader=None, lr=1e-3, weight_decay=0, device='cpu'):
-        self.device = torch.device(device)
-        self.model = model.to(self.device)
-        self.train_loader = train_loader
-        self.val_loader = val_loader
-        self.criterion = CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
-
-    def _run_epoch(self, loader, training=False):
-        if training:
-            self.model.train()
-        else:
-            self.model.eval()
-
-        total_loss = 0.0
-        correct = 0
-        total = 0
-
-        for x, y in loader:
-            x, y = x.to(self.device), y.to(self.device)
-
-            if training:
-                self.optimizer.zero_grad()
-
-            with torch.set_grad_enabled(training):
-                outputs = self.model(x)
-                loss = self.criterion(outputs, y)
-
-                if training:
-                    loss.backward()
-                    self.optimizer.step()
-
-            total_loss += loss.item() * x.size(0)
-            _, predicted = torch.max(outputs, 1)
-            correct += (predicted == y).sum().item()
-            total += y.size(0)
-
-        return total_loss / total, correct / total
-
-    def train_epoch(self):
-        return self._run_epoch(self.train_loader, training=True)
-
-    def validate_epoch(self):
-        if self.val_loader is None:
-            raise ValueError("No validation loader provided.")
-        return self._run_epoch(self.val_loader, training=False)
-
-
 ################################################
 ################# Loss Functions ###############
 ################################################
@@ -94,7 +41,6 @@ class CrossEntropyLoss(nn.Module):
         criterion = nn.CrossEntropyLoss()
         loss = criterion(x, y)
         return loss
-
 
 class MSELoss(nn.Module):
     def __init__(self):
@@ -193,6 +139,15 @@ class Dataset(Dataset):
         divval = torch.Tensor(rangeval).unsqueeze(0).expand(dataset_size, *sample_size)
         return torch.Tensor(x).sub(subval).div(divval)  
 
+class PreloadedDataset(Dataset):
+    def __init__(self, inputs, targets, norm_inputs=False, norm_targets=False, norm_mode="minmax", norm_threshold_inputs=1e-6, norm_threshold_targets=1e-6):
+        # Use the standard Dataset initialization
+        super().__init__(inputs, targets, norm_inputs, norm_targets, norm_mode, norm_threshold_inputs, norm_threshold_targets)
+
+    def __getitem__(self, idx):
+        # Directly use the parent class's __getitem__ method
+        return super().__getitem__(idx)
+
 ################################################
 #########  Save best model class ###############
 ################################################
@@ -217,7 +172,7 @@ class SaveBestModel():
                 'optimizer_state_dict': optimizer.state_dict(),
                 'best_valid_loss': self.best_valid_loss,
                 'best_train_loss': self.best_train_loss
-                }, self.best_model_name+'.pth')
+                }, self.best_model_name)
 
 class EarlyStopping:
     def __init__(self, patience=10, min_delta=0.001):

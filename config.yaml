@@ -1,0 +1,54 @@
+# Configuration file for PyISV
+
+# General settings
+device: "cpu"  # Options: "cuda", "cpu"
+seed: 42
+
+# Model settings
+model:
+  type: "autoencoder"  # Options: "autoencoder", "classifier"
+  input_shape: [1, 200]  # [Number of channels, Length]
+  encoder_channels: [8, 16, 32, 32] #[8, 16, 32, 64, 64, 128, 128]
+  decoder_channels: [32, 32, 16, 8] #[128, 64, 64, 32, 16, 8]
+  activation_fn: "ReLU"
+  embed_dim: 2
+
+# Training settings
+training:
+  batch_size: 64
+  train_fraction: 0.8
+  min_epochs: 1
+  max_epochs: 1
+  learning_rate: 0.005
+  early_stopping:
+    patience: 10
+    delta: 0.00005
+  loss: "MSE"  # Options: "MSE", "RMSE"
+
+# Data settings
+# Autoencoder-specific settings
+input:
+  autoencoder:
+    path: "data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
+    target_path: null  # Autoencoder uses the same input as target
+    normalization: "minmax"  # Options: "minmax", "gaussian"
+    padding:
+      enabled: false
+      final_size: 32
+
+# Classification-specific settings
+  classification:
+    path: "data/Ag38_labels/combined_isv_labels_2D_nonMin_to_min_k15_nCu_0.txt"  # Path for the input dataset for classification
+    target_path: null  # Classification typically uses labels, so no target dataset is needed
+    normalization: "gaussian"  # Options: "minmax", "gaussian"
+
+# Output settings
+output:
+  model_name: "models/best_model.pth"
+  log_file: "logs/train_log.txt"
+  stats_file: "stats/train_stats.txt"
+  normalization_params:
+    input_scaler_subval: "norm_vals/input_scaler_subval.npy"
+    input_scaler_divval: "norm_vals/input_scaler_divval.npy"
+    output_scaler_subval: "norm_vals/output_scaler_subval.npy"
+    output_scaler_divval: "norm_vals/output_scaler_divval.npy"

@@ -4,6 +4,8 @@
 *.pyo
 *.py[oc]
 
+# Ignore trace files
+*.trace.*
 
 # Ignore data files
 *.pt

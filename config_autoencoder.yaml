@@ -11,11 +11,11 @@ model:
   encoder_channels: [8, 16, 32, 32]
   decoder_channels: [32, 32, 16, 8]
   activation_fn: "ReLU"
-  embed_dim: 3
+  embed_dim: 2
 
 # Training settings
 training:
-  batch_size: 64
+  batch_size: 254
   train_fraction: 0.8
   min_epochs: 1
   max_epochs: 1
@@ -27,7 +27,7 @@ training:
 
 # Data settings
 input:
-  path: "data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
+  path: "./data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
   target_path: null  # Autoencoder uses the same input as target
   normalization: "minmax"  # Options: "minmax", "gaussian"
   padding:
@@ -36,11 +36,11 @@ input:
 
 # Output settings
 output:
-  model_name: "models/best_model.pth"
-  log_file: "logs/train_log.txt"
-  stats_file: "stats/train_stats.txt"
+  model_name: "models/best_autoencoder_model.pth"
+  log_file: "logs/train_autoencoder_log.txt"
+  stats_file: "stats/train_autoencoder_stats.txt"
   normalization_params:
-    input_scaler_subval: "norm_vals/input_scaler_subval.npy"
-    input_scaler_divval: "norm_vals/input_scaler_divval.npy"
-    output_scaler_subval: "norm_vals/output_scaler_subval.npy"
-    output_scaler_divval: "norm_vals/output_scaler_divval.npy"
+    input_scaler_subval: "norm_vals/input_autoen_scaler_subval.npy"
+    input_scaler_divval: "norm_vals/input_autoen_scaler_divval.npy"
+    output_scaler_subval: "norm_vals/output_autoen_scaler_subval.npy"
+    output_scaler_divval: "norm_vals/output_autoen_scaler_divval.npy"

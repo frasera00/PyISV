@@ -6,6 +6,8 @@ import numpy as np
 import yaml
 import logging
 import torch.utils.bottleneck
+import torch.profiler
+from torch.cuda.amp import autocast, GradScaler
 
 # Load the autoencoder-specific configuration file
 with open("config_autoencoder.yaml", "r") as file:
@@ -76,12 +78,12 @@ train_loader = DataLoader(train_dataset,
                           batch_size=batch_size,
                           shuffle=True,
                           num_workers=0,
-                          pin_memory=False)
+                          pin_memory=True)
 valid_loader = DataLoader(valid_dataset,
                           batch_size=batch_size,
                           shuffle=False,
                           num_workers=0,
-                          pin_memory=False)
+                          pin_memory=True)
 # Initialize model
 model = NeuralNetwork(
     model_type="autoencoder",
@@ -103,22 +105,25 @@ early_stopping = EarlyStopping(patience=early_stopping_config["patience"], min_d
 def train_autoencoder(model, train_loader, valid_loader, max_epochs, min_epochs, lrate, device, loss_function, early_stopping, save_best_model):
     """Encapsulates the training logic for the autoencoder."""
     optimizer = torch.optim.Adam(model.parameters(), lr=lrate)
+    scaler = GradScaler()  # Initialize gradient scaler for mixed precision
 
-    # Add a debug log to confirm max_epochs is respected
-    logging.debug(f"Starting training with max_epochs={max_epochs}")
-
-    # Ensure the loop respects max_epochs
     for epoch in range(max_epochs):
-        logging.debug(f"Starting epoch {epoch + 1}/{max_epochs}")
         model.train()
         total_loss = 0
         for x, _ in train_loader:
             x = x.to(device)
             optimizer.zero_grad()
-            reconstructed, _ = model(x)
-            loss = loss_function(reconstructed, x)
-            loss.backward()
-            optimizer.step()
+
+            # Use autocast for mixed precision
+            with autocast():
+                reconstructed, _ = model(x)
+                loss = loss_function(reconstructed, x)
+
+            # Scale the loss and backpropagate
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
             total_loss += loss.item()
 
         logging.info(f"Epoch {epoch + 1}/{max_epochs}, Loss: {total_loss:.4f}")
@@ -129,8 +134,9 @@ def train_autoencoder(model, train_loader, valid_loader, max_epochs, min_epochs,
         with torch.no_grad():
             for x, _ in valid_loader:
                 x = x.to(device)
-                reconstructed, _ = model(x)
-                loss = loss_function(reconstructed, x)
+                with autocast():
+                    reconstructed, _ = model(x)
+                    loss = loss_function(reconstructed, x)
                 val_loss += loss.item()
 
         logging.info(f"Validation Loss: {val_loss:.4f}")

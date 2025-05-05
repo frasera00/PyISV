@@ -1,11 +1,10 @@
-import pytest
 import torch
+import unittest
+from unittest.mock import patch
 from scripts.inspect_data import inspect_data
 
-def test_inspect_data(monkeypatch):
-    """Test the inspect_data function."""
-    # Mock torch.load to return dummy data
-    def mock_torch_load(path):
+class TestInspectData(unittest.TestCase):
+    def mock_torch_load(self, path):
         if "labels.pt" in path:
             return torch.zeros(10, 1)  # Mocked labels
         elif "rdf_images.pt" in path:
@@ -13,10 +12,14 @@ def test_inspect_data(monkeypatch):
         else:
             raise FileNotFoundError(f"File not found: {path}")
 
-    monkeypatch.setattr(torch, "load", mock_torch_load)
+    @patch("torch.load")
+    def test_inspect_data(self, mock_load):
+        """Test the inspect_data function."""
+        mock_load.side_effect = self.mock_torch_load
+        try:
+            inspect_data()
+        except Exception as e:
+            self.fail(f"inspect_data raised an exception: {e}")
 
-    # Run the inspect_data function
-    try:
-        inspect_data()
-    except Exception as e:
-        pytest.fail(f"inspect_data raised an exception: {e}")
+if __name__ == "__main__":
+    unittest.main()

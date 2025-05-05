@@ -7,7 +7,6 @@ class TestModelTrainingScript(unittest.TestCase):
     @patch("torch.load")
     def test_training(self, mock_torch_load):
         """Test the training process of the model."""
-        # Mock torch.load to avoid FileNotFoundError
         mock_torch_load.return_value = MagicMock(shape=(72000, 1, 200))
 
         # Ensure the model is initialized correctly

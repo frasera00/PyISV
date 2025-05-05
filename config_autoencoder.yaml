@@ -6,39 +6,42 @@ seed: 42
 
 # Model settings
 model:
-  type: "autoencoder"  # Options: "autoencoder", "classifier"
-  input_shape: [1, 200]  # [Number of channels, Length]
-  encoder_channels: [8, 16, 32, 32]
-  decoder_channels: [32, 32, 16, 8]
+  type: "autoencoder"     # Options: "autoencoder", "classifier"
+  input_shape: [1, 340]   # Updated input shape for 1D convolutions
+  encoder_channels: [8, 16, 32, 64, 64, 128, 128]  # Updated to match the Autoencoder class
+  decoder_channels: [128, 64, 64, 32, 16, 8]  # Updated to match the Autoencoder class
   activation_fn: "ReLU"
-  embed_dim: 2
+  embed_dim: 2            # Bottleneck size
+  kernel_size: 5  # Kernel size used in the Autoencoder class
 
 # Training settings
 training:
-  batch_size: 254
+  batch_size: 64          # Batch size
   train_fraction: 0.8
-  min_epochs: 1
-  max_epochs: 1
+  min_epochs: 75   
+  max_epochs: 250
   learning_rate: 0.005
+  scheduled_lr: True     # Use learning rate scheduler
   early_stopping:
     patience: 10
     delta: 0.00005
-  loss: "MSE"  # Options: "MSE", "RMSE"
+  loss: "MSE"             # Options: "MSE", "RMSE"
 
 # Data settings
 input:
   path: "./data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
-  target_path: null  # Autoencoder uses the same input as target
-  normalization: "minmax"  # Options: "minmax", "gaussian"
+  target_path: null                  # Autoencoder uses the same input as target
+  normalization: "minmax"            # Options: "minmax", "gaussian"
   padding:
     enabled: false
     final_size: 32
 
 # Output settings
 output:
-  model_name: "models/best_autoencoder_model.pth"
-  log_file: "logs/train_autoencoder_log.txt"
-  stats_file: "stats/train_autoencoder_stats.txt"
+  model_name: "./models/best_autoencoder_model.pth"
+  log_file: "./logs/train_autoencoder_log.txt"
+  stats_file: "./stats/train_autoencoder_stats.txt"
+  model_architecture_file: "./models/autoencoder_architecture.txt"
   normalization_params:
     input_scaler_subval: "norm_vals/input_autoen_scaler_subval.npy"
     input_scaler_divval: "norm_vals/input_autoen_scaler_divval.npy"

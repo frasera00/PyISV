@@ -5,7 +5,7 @@
 *.py[oc]
 
 # Ignore trace files
-*.trace.*
+./logs/profiler/*.json
 
 # Ignore data files
 *.pt

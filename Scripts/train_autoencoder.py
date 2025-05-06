@@ -45,8 +45,8 @@ early_stopping_config = training_config["early_stopping"]
 
 # -- Data settings -- #
 data_config = config["input"]
-input_data_path = data_config["path"]
-target_data_path = data_config["target_path"]
+input_data_path = os.path.abspath(data_config["path"])
+target_data_path = os.path.abspath(data_config["target_path"])
 
 # Load input data
 input_data = torch.load(input_data_path).float()
@@ -54,11 +54,12 @@ input_data = torch.load(input_data_path).float()
 if target_data_path:
     # If target data is provided, load it
     target_data = torch.load(target_data_path).float()
-else:       
+else:
     # If no target data is provided (pure autoencoder), use input data as target
-    target_data = input_data.clone()  
+    target_data = input_data.clone()
 
-# Initialize dataset
+# Save normalization parameters for input data
+# Save normalization parameters for target data
 dataset = Dataset(
     input_data,
     target_data,
@@ -66,8 +67,8 @@ dataset = Dataset(
     norm_targets=True,
     norm_mode=data_config.get("normalization", "minmax")
 )
-
-# Save normalization parameters
+np.save(config["output"]["normalization_params"]["target_scaler_subval"], dataset.subval_targets.numpy())
+np.save(config["output"]["normalization_params"]["target_scaler_divval"], dataset.divval_targets.numpy())
 np.save(config["output"]["normalization_params"]["input_scaler_subval"], dataset.subval_inputs.numpy())
 np.save(config["output"]["normalization_params"]["input_scaler_divval"], dataset.divval_inputs.numpy())
 
@@ -124,7 +125,7 @@ with open(stats_file, "w") as f:
     f.write("epoch,train_loss,val_loss\n")  # Write header
 
 # Save the model architecture to a file
-model_architecture_file = config["output"]["model_architecture"]
+model_architecture_file = config["output"]["model_architecture_file"]
 with open(model_architecture_file, "w") as f:
     f.write(str(model))  # Save the model architecture
 

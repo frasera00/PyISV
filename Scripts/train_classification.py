@@ -21,8 +21,16 @@ torch.manual_seed(config["seed"])
 
 # Model settings
 model_config = config["model"]
+model_type = model_config["type"]
 activation_fn = getattr(torch.nn, model_config["activation_fn"], torch.nn.ReLU)
 embed_dim = model_config.get("embed_dim", 16)  # Default to 16 if not present
+num_classes = model_config["num_classes"]
+encoder_channels = model_config["encoder_channels"]
+kernel_size = model_config.get("kernel_size", 5)  # Default to 5 if not specified
+
+# Ensure encoder_channels is a list
+if isinstance(encoder_channels, int):
+    encoder_channels = [encoder_channels]
 
 # Training settings
 training_config = config["training"]
@@ -37,9 +45,6 @@ data_config = config["input"]
 # Resolve absolute paths for data files
 input_data_path = os.path.abspath(data_config["path"])
 labels_data_path = os.path.abspath(data_config["labels_path"])
-
-print(f"Resolved input_data_path: {input_data_path}")
-print(f"Resolved labels_data_path: {labels_data_path}")
 
 # Load input data
 input_data = torch.load(input_data_path).float()
@@ -67,14 +72,19 @@ valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False)
 
 # Initialize model
 model = NeuralNetwork(
-    model_type="classifier",
+    model_type=model_type,
     input_shape=(1, input_data.shape[-1]),
     embed_dim=embed_dim,
-    num_classes=model_config["num_classes"],
-    encoder_channels=model_config["encoder_channels"],
+    num_classes=num_classes,
+    encoder_channels=encoder_channels,
     activation_fn=activation_fn,
-    use_pooling=True
+    use_pooling=True,
+    kernel_size=kernel_size,
 )
+
+model_architecture_file = config["output"]["model_architecture_file"]
+with open(model_architecture_file, "w") as f:
+    f.write(str(model))  # Save the model architecture
 
 # Train the model
 model.train_model(

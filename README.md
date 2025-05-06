@@ -28,7 +28,7 @@ Stores datasets, predictions, and RDF-related data.
 Contains unit tests for the library.
 
 ### models
-Stores pre-trained models, such as `classifier_best.pt`, for classification of structures for Ag38 clusters.
+Stores pre-trained models, such as `best_autoencoder_model.pt`, for classification of structures for Ag38 clusters.
 
 ## Installation
 Clone the repository and install it in your Python environment:

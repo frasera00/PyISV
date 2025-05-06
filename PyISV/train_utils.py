@@ -2,14 +2,12 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
-################################################
-################# Loss Functions ###############
-################################################
+
+# -- Loss functions -- #
 
 class RMSELoss(nn.Module):
     def __init__(self):
         super(RMSELoss,self).__init__()
-
     def forward(self,x,y):
         criterion = nn.MSELoss()
         loss = torch.sqrt(criterion(x, y))
@@ -18,7 +16,6 @@ class RMSELoss(nn.Module):
 class BCEWithLogitsLoss(nn.Module):
     def __init__(self):
         super(BCEWithLogitsLoss,self).__init__()
-
     def forward(self,x,y):
         criterion = nn.BCEWithLogitsLoss()
         loss = criterion(x, y)
@@ -27,7 +24,6 @@ class BCEWithLogitsLoss(nn.Module):
 class BCELoss(nn.Module):
     def __init__(self):
         super(BCELoss,self).__init__()
-
     def forward(self,x,y):
         criterion = nn.BCELoss()
         loss = criterion(x, y)
@@ -36,7 +32,6 @@ class BCELoss(nn.Module):
 class CrossEntropyLoss(nn.Module):
     def __init__(self):
         super(CrossEntropyLoss,self).__init__()
-
     def forward(self,x,y):
         criterion = nn.CrossEntropyLoss()
         loss = criterion(x, y)
@@ -45,7 +40,6 @@ class CrossEntropyLoss(nn.Module):
 class MSELoss(nn.Module):
     def __init__(self):
         super(MSELoss,self).__init__()
-
     def forward(self,x,y):
         criterion =  nn.MSELoss()
         loss = criterion(x, y)
@@ -54,7 +48,6 @@ class MSELoss(nn.Module):
 class HuberLoss(nn.Module):
     def __init__(self):
         super(HuberLoss,self).__init__()
-
     def forward(self,x,y,delta):
         a=torch.abs(x-y)
         a=torch.flatten(a)
@@ -68,10 +61,7 @@ class HuberLoss(nn.Module):
         loss=torch.sum(lossval)/batchsize
         return loss
 
-################################################
-################# Dataset class  ###############
-################################################
-
+# -- Dataset class -- #
 class Dataset(Dataset):
 
     def __init__(self, inputs, targets, norm_inputs=False, norm_targets=False, norm_mode="minmax", norm_threshold_inputs=1e-6, norm_threshold_targets=1e-6):
@@ -139,6 +129,7 @@ class Dataset(Dataset):
         divval = torch.Tensor(rangeval).unsqueeze(0).expand(dataset_size, *sample_size)
         return torch.Tensor(x).sub(subval).div(divval)  
 
+# -- PreloadedDataset class -- #
 class PreloadedDataset(Dataset):
     def __init__(self, inputs, targets, norm_inputs=False, norm_targets=False, norm_mode="minmax", norm_threshold_inputs=1e-6, norm_threshold_targets=1e-6):
         # Use the standard Dataset initialization
@@ -148,10 +139,7 @@ class PreloadedDataset(Dataset):
         # Directly use the parent class's __getitem__ method
         return super().__getitem__(idx)
 
-################################################
-#########  Save best model class ###############
-################################################
-
+# -- Callbacks -- #
 class SaveBestModel():
     # see: https://pytorch.org/tutorials/beginner/saving_loading_models.html
     def __init__(self, best_valid_loss=float('inf'), best_train_loss=float('inf'), best_model_name="best_model"): 
@@ -174,6 +162,7 @@ class SaveBestModel():
                 'best_train_loss': self.best_train_loss
                 }, self.best_model_name)
 
+# -- Early Stopping -- #
 class EarlyStopping:
     def __init__(self, patience=10, min_delta=0.001):
         """
@@ -194,3 +183,4 @@ class EarlyStopping:
             self.counter += 1  # Increment counter if no improvement
 
         return self.counter >= self.patience
+

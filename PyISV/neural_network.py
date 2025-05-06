@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.jit
 import numpy as np
-from PyISV.classification_utils import build_classification_head
-from PyISV.autoencoder_utils import build_encoder, build_decoder, build_bottleneck
+from PyISV.model_building import build_encoder, build_decoder, build_bottleneck, build_classification_head
 
 class NeuralNetwork(nn.Module):
     # --- Utility: shape assertion for debugging ---
@@ -43,25 +42,24 @@ class NeuralNetwork(nn.Module):
         # Calculate num_encoder_final_channels internally based on encoder_channels
         self.num_encoder_final_channels = encoder_channels[-1]
 
-        # Calculate flat_dim analytically
-        flat_dim = input_shape[1]  # Start with input length
-        for layer_channels in encoder_channels:
-            flat_dim = (flat_dim + 2 * (self.kernel_size // 2) - self.kernel_size) // 2 + 1  # Convolution
-            flat_dim = flat_dim // 2  # MaxPooling
-        self.flat_dim = flat_dim * self.num_encoder_final_channels  # Multiply by the number of final channels
+        # Infer spatial dimension dynamically from input shape
+        # Dynamically infer flat_dim using a dummy input tensor
+        dummy_input = torch.zeros(1, input_shape[0], input_shape[1])  # Batch size 1, input channels, input length
+        dummy_output = build_encoder(input_shape[0], encoder_channels, self.activation_fn, kernel_size=self.kernel_size)(dummy_input)
+        self.flat_dim = dummy_output.size(1) * dummy_output.size(2)  # Channels * spatial dimension
 
         if self.model_type == "autoencoder":
             self.encoder = build_encoder(
                 input_shape[0],          # input_channels
                 encoder_channels,        # encoder_channels
                 self.activation_fn,           # activation_fn
-                kernel_size=self.kernel_size  # Pass kernel size
+                kernel_size=self.kernel_size,  # Pass kernel size
             )
             # Ensure bottleneck input size matches encoder output
             self.bottleneck = build_bottleneck(
-                flat_dim=self.flat_dim,  # Correctly use flat_dim
-                embed_dim=embed_dim,
-                num_encoder_final_channels=self.num_encoder_final_channels  # Correctly use num_encoder_final_channels
+                flat_dim=self.flat_dim,
+                embed_dim=self.embed_dim,
+                num_encoder_final_channels=self.num_encoder_final_channels
             )
             self.decoder = build_decoder(
                 [encoder_channels[-1]] + decoder_channels,
@@ -71,18 +69,27 @@ class NeuralNetwork(nn.Module):
             )
         elif self.model_type == "classifier":
             self.encoder = build_encoder(
-                input_shape[0],  # input_channels
-                input_shape[1],  # input_length
-                encoder_channels,  # encoder_channels
-                activation_fn  # activation_fn
+                input_shape[0],
+                encoder_channels,
+                self.activation_fn,
             )
-            self.classification_head = build_classification_head(self.encoder, input_shape, embed_dim, num_classes, activation_fn)
+            # Enhanced classification head
+            self.classification_head = nn.Sequential(
+                nn.Linear(self.flat_dim, 128),  # Added a fully connected layer
+                nn.ReLU(),
+                nn.Dropout(0.5),  # Added dropout for regularization
+                nn.Linear(128, embed_dim),
+                nn.ReLU(),
+                nn.Linear(embed_dim, num_classes)
+            )
         else:
             raise ValueError("Invalid model_type. Choose from 'autoencoder' or 'classifier'.")
 
     def forward(self, x):
-        # Optionally assert input shape here for debugging
-        # self._assert_shape(x, (x.size(0), self.encoder[0].in_channels, ...), name="Input")
+        # Assert input shape for debugging
+        expected_shape = (x.size(0), self.encoder[0].in_channels, x.size(2))
+        self._assert_shape(x, expected_shape, name="Input")
+        
         if self.model_type == "autoencoder":
             z = self.encoder(x)
             z_flat = z.view(z.size(0), -1)  # Flatten the tensor
@@ -198,9 +205,9 @@ class NeuralNetwork(nn.Module):
             if (epoch + 1) % log_interval == 0:
                 if self.model_type == "classifier":
                     accuracy = correct / total if total > 0 else 0
-                    print(f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss:.4f}, Accuracy: {accuracy * 100:.2f}%")
+                    print(f"Epoch {epoch + 1}/{epochs}, Training Loss: {total_loss:.4f}, Accuracy: {accuracy * 100:.2f}%")
                 else:
-                    print(f"Epoch {epoch + 1}/{epochs}, Loss: {total_loss:.4f}")
+                    print(f"Epoch {epoch + 1}/{epochs}, Training Loss: {total_loss:.4f}")
 
             # Early stopping
             if early_stopping is not None and val_loss is not None:

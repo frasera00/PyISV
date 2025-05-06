@@ -38,12 +38,12 @@ input:
 
 # Output settings
 output:
-  model_name: "./models/best_autoencoder_model.pth"
+  model_name: "./models/best_autoencoder_model.pt"
   log_file: "./logs/train_autoencoder_log.txt"
   stats_file: "./stats/train_autoencoder_stats.txt"
   model_architecture_file: "./models/autoencoder_architecture.txt"
   normalization_params:
     input_scaler_subval: "norm_vals/input_autoen_scaler_subval.npy"
     input_scaler_divval: "norm_vals/input_autoen_scaler_divval.npy"
-    output_scaler_subval: "norm_vals/output_autoen_scaler_subval.npy"
-    output_scaler_divval: "norm_vals/output_autoen_scaler_divval.npy"
+    target_scaler_subval: "norm_vals/target_autoen_scaler_subval.npy"
+    target_scaler_divval: "norm_vals/target_autoen_scaler_divval.npy"

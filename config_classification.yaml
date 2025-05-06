@@ -7,34 +7,33 @@ seed: 42
 # Model settings
 model:
   type: "classifier"  # Options: "autoencoder", "classifier"
-  input_shape: [1, 200]  # [Number of channels, Length]
-  encoder_channels: [8, 16, 32, 32]
+  input_shape: [1, 340]  # [Number of channels, Length]
+  encoder_channels: [16, 32] 
   activation_fn: "ReLU"
-  embed_dim: 16
+  embed_dim: 2
   num_classes: 7  # Number of output classes for classification
-
+  kernel_size: 5  
+  
 # Training settings
 training:
-  batch_size: 64
+  batch_size: 64  # Reduced batch size for better gradient updates
   train_fraction: 0.8
-  min_epochs: 1
-  max_epochs: 1
-  learning_rate: 0.005
+  min_epochs: 10
+  max_epochs: 100
+  learning_rate: 0.001  # Reduced learning rate for stable convergence
   early_stopping:
-    patience: 10
-    delta: 0.00005
+    patience: 5  # Reduced patience for quicker stopping
+    delta: 0.0001  # Adjusted delta for early stopping
 
 # Data settings
 input:
-  path: "data/RDFs/rdf_images.pt"  # Path for the input dataset for classification
-  labels_path: "data/Ag38_labels/labels.pt"  # Path for the labels dataset for classification
+  path: "./data/RDFs/rdf_images.pt"  # Path for the input dataset for classification
+  labels_path: "./data/Ag38_labels/labels.pt"  # Path for the labels dataset for classification
   normalization: "gaussian"  # Options: "minmax", "gaussian"
 
 # Output settings
 output:
-  model_name: "models/best_model_classification.pth"
-  log_file: "logs/train_classification_log.txt"
-  stats_file: "stats/train_classification_stats.txt"
-  normalization_params:
-    input_scaler_subval: "norm_vals/input_scaler_subval.npy"
-    input_scaler_divval: "norm_vals/input_scaler_divval.npy"
+  model_name: "./models/best_classification_model.pt"
+  log_file: "./logs/train_classification_log.txt"
+  stats_file: "./stats/train_classification_stats.txt"
+  model_architecture_file: "./models/classification_architecture.txt"

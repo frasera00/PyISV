@@ -29,7 +29,7 @@ wheels/
 *.log
 
 # Ignore macOS system files
-*.DS_Store
+#*.DS_Store
 
 # Ignore scripts to run in clusters:
 run_mono.sh

@@ -25,12 +25,14 @@ class TestClassificationTrainingScript(unittest.TestCase):
         # Call the training method of the model
         try:
             model.train_model(
-                train_loader=train_loader,
-                val_loader=valid_loader,
-                epochs=1,  # Run for 1 epoch to test functionality
-                lr=lrate,
-                device=model.device,
-                criterion=CrossEntropyLoss()  # Use a real loss function
+                train_loader,
+                valid_loader,
+                config={
+                    "epochs": 1,
+                    "lr": lrate,
+                    "device": model.device,
+                    "criterion": CrossEntropyLoss()
+                }
             )
         except Exception as e:
             self.fail(f"Training failed with exception: {e}")

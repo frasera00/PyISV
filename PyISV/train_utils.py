@@ -2,9 +2,12 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 
+# -- Model type check -- #
+class InvalidModelTypeError(ValueError):
+    def __init__(self):
+        super().__init__("Invalid model_type. Choose from 'autoencoder' or 'classifier'.")
 
 # -- Loss functions -- #
-
 class RMSELoss(nn.Module):
     def __init__(self):
         super(RMSELoss,self).__init__()
@@ -60,10 +63,8 @@ class HuberLoss(nn.Module):
                 lossval[i] = delta*(a[i]-0.5*delta)
         loss=torch.sum(lossval)/batchsize
         return loss
-
 # -- Dataset class -- #
 class Dataset(Dataset):
-
     def __init__(self, inputs, targets, norm_inputs=False, norm_targets=False, norm_mode="minmax", norm_threshold_inputs=1e-6, norm_threshold_targets=1e-6):
         
         self.num_inputs = inputs.shape[0]    

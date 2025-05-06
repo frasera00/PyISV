@@ -88,12 +88,21 @@ with open(model_architecture_file, "w") as f:
 
 # Train the model
 model.train_model(
-    train_loader=train_loader,
-    val_loader=valid_loader,
-    epochs=max_epochs,
-    lr=lrate,
-    device=device,
-    criterion=CrossEntropyLoss()
+    train_loader,
+    valid_loader,
+    config={
+        "epochs": max_epochs,
+        "lr": lrate,
+        "device": device,
+        "criterion": CrossEntropyLoss(),
+        # Add other options as needed, e.g.:
+        # "scheduler": my_scheduler,
+        # "early_stopping": my_early_stopping,
+        # "checkpoint_path": "./checkpoints/model.pt",
+        # "amp": True,
+        # "grad_clip": 1.0,
+        # "log_interval": 5,
+    }
 )
 
 # Save the trained model

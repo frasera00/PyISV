@@ -16,16 +16,22 @@ model:
 
 # Training settings
 training:
-  batch_size: 64          # Batch size
-  train_fraction: 0.8
-  min_epochs: 75   
-  max_epochs: 250
-  learning_rate: 0.005
-  scheduled_lr: True     # Use learning rate scheduler
+  batch_size: 64             # Batch size
+  train_fraction: 0.8        # Fraction of data used for training
+  min_epochs: 75             # Minimum number of epochs
+  max_epochs: 250            # Maximum number of epochs
+  learning_rate: 0.005       # Learning rate
+  scheduled_lr: True         # Use learning rate scheduler
+  weight_decay: 0.0          # Weight decay for optimizer
+  amp: false                 # Use automatic mixed precision (AMP)
+  grad_clip: null            # Clip gradients to this value (null = no clipping)
+  checkpoint_path: "./models/best_autoencoder_model.pt"  # Path to save checkpoints
+  log_interval: 5            # Print training progress every log_interval epochs
+  use_separate_target: false # Use y as target for loss (default: false for autoencoder)
+  criterion: nn.MSELoss()    # Loss function for autoencoder
   early_stopping:
     patience: 10
     delta: 0.00005
-  loss: "MSE"             # Options: "MSE", "RMSE"
 
 # Data settings
 input:

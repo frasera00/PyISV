@@ -2,19 +2,17 @@ import torch
 import torch.nn as nn
 
 # -- Model building functions -- #
-def build_classification_head(encoder, input_shape, embed_dim, num_classes, activation_fn, dropout=None):
+def build_classification_head(embed_dim, num_classes, activation_fn, flat_dim, hidden_dim=128, dropout=None):
     """Builds a classification head."""
-    with torch.no_grad():
-        dummy_input = torch.zeros(1, *input_shape)
-        dummy_output = encoder(dummy_input)
-        flat_dim = dummy_output.view(1, -1).shape[1]
 
     return nn.Sequential(
-        nn.Linear(flat_dim, embed_dim),
-        activation_fn(),
-        nn.Dropout(dropout) if dropout else nn.Identity(),
-        nn.Linear(embed_dim, num_classes),
-    )
+            nn.Linear(flat_dim, hidden_dim),
+            activation_fn(),
+            nn.Dropout(dropout) if dropout else nn.Identity(),
+            nn.Linear(hidden_dim, embed_dim),
+            activation_fn(),
+            nn.Linear(embed_dim, num_classes)
+            )
 
 def build_encoder(input_channels, encoder_channels, activation_fn, kernel_size=5):
     """Builds the encoder for 1D data with `same` padding."""

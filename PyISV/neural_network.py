@@ -73,14 +73,13 @@ class NeuralNetwork(nn.Module):
                 encoder_channels,
                 self.activation_fn,
             )
-            # Enhanced classification head
-            self.classification_head = nn.Sequential(
-                nn.Linear(self.flat_dim, 128),  # Added a fully connected layer
-                nn.ReLU(),
-                nn.Dropout(0.5),  # Added dropout for regularization
-                nn.Linear(128, embed_dim),
-                nn.ReLU(),
-                nn.Linear(embed_dim, num_classes)
+            self.classification_head = build_classification_head(
+                embed_dim=self.embed_dim,
+                num_classes=self.num_classes,
+                activation_fn=self.activation_fn,
+                flat_dim=self.flat_dim,
+                hidden_dim=64,
+                dropout=None
             )
         else:
             raise ValueError("Invalid model_type. Choose from 'autoencoder' or 'classifier'.")

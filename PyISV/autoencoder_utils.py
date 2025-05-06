@@ -44,3 +44,4 @@ def build_decoder(decoder_channels, activation_fn, output_length, kernel_size=5)
     layers.append(nn.Upsample(size=output_length, mode='linear', align_corners=True))
 
     return nn.Sequential(*layers)
+

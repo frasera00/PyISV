@@ -33,3 +33,6 @@ wheels/
 
 # Ignore scripts to run in clusters:
 run_mono.sh
+
+# Ignore vscode files
+#*.vscode

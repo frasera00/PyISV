@@ -1,135 +1,194 @@
-import torch
-from torch.utils.data import DataLoader
+# -*- coding: utf-8 -*-
+
+# Autoencoder training script
 from PyISV.neural_network import NeuralNetwork
 from PyISV.train_utils import Dataset, MSELoss, SaveBestModel, EarlyStopping, PreloadedDataset
-import numpy as np
+
+# Import general libraries
+import datetime
+import os
+import time 
 import yaml
 import logging
+import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Import PyTorch libraries
+import torch
+import torch.distributed as dist
+from torch.nn import DataParallel
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader
+
+# Profiling utilities for performance analysis
 import torch.utils.bottleneck
 import torch.profiler
-from torch.cuda.amp import autocast, GradScaler
-import os
-import matplotlib.pyplot as plt
-import time  # Import time module
 
-# Load the autoencoder-specific configuration file
+# -- Load autoencoder configuration file -- #
 with open("config_autoencoder.yaml", "r") as file:
     config = yaml.safe_load(file)
 
-# Setup logging
+# -- Logging setup -- #
 log_file = config["output"]["log_file"]
 logging.basicConfig(filename=log_file, level=logging.INFO, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-# -- General settings -- # 
-device = torch.device(config["device"])
-torch.manual_seed(config["seed"])
+# Generate a unique run ID for this experiment
+RUN_ID = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+logging.info(f"Run ID: {RUN_ID}")
+
+# -- Device setup, DDP optional -- #
+use_ddp = int(config.get("use_ddp", 0))  # Default to 0
+if use_ddp:
+    dist.init_process_group(backend='nccl')
+    local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    torch.cuda.set_device(local_rank)
+    DEVICE = torch.device(f"cuda:{local_rank}")
+else:
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    logging.info(f"Running on device: {DEVICE}")
+
+# -- Setting seed -- #
+if DEVICE == "cuda":
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False 
+    logging.info("Using deterministic mode for CUDA")
+else:
+    seed = config("seed", 42)  # Default seed value
+    torch.manual_seed(seed)
 
 # -- Model settings -- #
-model_config = config["model"]
-model_type = config["model"]["type"]
-activation_fn = getattr(torch.nn, model_config["activation_fn"], torch.nn.ReLU) # Default to ReLU if not defined
-kernel_size = model_config.get("kernel_size", 5)  # Default to 5 if not specified
-embed_dim = model_config["embed_dim"]
-encoder_channels = model_config["encoder_channels"]
-decoder_channels = model_config["decoder_channels"]
+MODEL_CONFIG = config["model"]
+model_type = MODEL_CONFIG["type"]
+activation_fn = getattr(torch.nn, MODEL_CONFIG["activation_fn"], torch.nn.ReLU) # Default to ReLU if not defined
+kernel_size = MODEL_CONFIG.get("kernel_size", 5)               # Default to 5 if not specified
+embed_dim = MODEL_CONFIG["embed_dim"]
+encoder_channels = MODEL_CONFIG["encoder_channels"]
+decoder_channels = MODEL_CONFIG["decoder_channels"]
 
 # -- Training settings -- #
-training_config = config["training"]
-batch_size = training_config["batch_size"]
-train_fraction = training_config["train_fraction"]
-min_epochs = training_config["min_epochs"]
-max_epochs = training_config["max_epochs"]
-lrate = training_config["learning_rate"]
-early_stopping_config = training_config["early_stopping"]
+TRAINING_CONFIG = config["training"]
+batch_size = TRAINING_CONFIG.get("batch_size", 32)
+train_fraction = TRAINING_CONFIG.get("train_fraction", 0.8)  # Default to 80% if not specified
+min_epochs = TRAINING_CONFIG.get("min_epochs", 10)           # Default to 10 if not specified
+max_epochs = TRAINING_CONFIG.get("max_epochs", 100)          # Default to 100 if not specified
+lrate = TRAINING_CONFIG.get("learning_rate", 0.001)          # Default to 0.001 if not specified
+early_stopping_config = TRAINING_CONFIG.get("early_stopping", False)  # Default to False if not specified
+num_workers = TRAINING_CONFIG.get("num_workers", 1)          # Default to 1 if not specified
+pin_memory = TRAINING_CONFIG.get("pin_memory", False)        # Default to False if not specified
 
-# -- Data settings -- #
-data_config = config["input"]
-input_data_path = os.path.abspath(data_config["path"])
-target_data_path = os.path.abspath(data_config["target_path"])
+# -- Data, input and output settings -- #
+DATA_CONFIG = config["input"]
+OUTPUT_CONFIG = config["output"]
+INPUT_PATH = os.path.abspath(DATA_CONFIG["path"])
+OUTPUT_PATH = os.path.abspath(DATA_CONFIG["target_path"]) if DATA_CONFIG["target_path"] else None
+INPUT_DATA = torch.load(INPUT_PATH).float()
 
-# Load input data
-input_data = torch.load(input_data_path).float()
-
-if target_data_path:
-    # If target data is provided, load it
-    target_data = torch.load(target_data_path).float()
+if OUTPUT_PATH:
+    TARGET_DATA = torch.load(OUTPUT_PATH).float()  # If provided, load it
 else:
-    # If no target data is provided (pure autoencoder), use input data as target
-    target_data = input_data.clone()
+    TARGET_DATA = INPUT_DATA.clone()  # If not provided (pure autoencoder), use input data as target
 
-# Save normalization parameters for input data
-# Save normalization parameters for target data
+# Create dataset
 dataset = Dataset(
-    input_data,
-    target_data,
+    INPUT_DATA,
+    TARGET_DATA,
     norm_inputs=True,
     norm_targets=True,
-    norm_mode=data_config.get("normalization", "minmax")
+    norm_mode=DATA_CONFIG.get("normalization", "minmax") # Default to minmax if not specified
 )
-np.save(config["output"]["normalization_params"]["target_scaler_subval"], dataset.subval_targets.numpy())
-np.save(config["output"]["normalization_params"]["target_scaler_divval"], dataset.divval_targets.numpy())
-np.save(config["output"]["normalization_params"]["input_scaler_subval"], dataset.subval_inputs.numpy())
-np.save(config["output"]["normalization_params"]["input_scaler_divval"], dataset.divval_inputs.numpy())
+
+# Save normalization parameters for input and target data
+np.save(OUTPUT_CONFIG["normalization_params"]["target_scaler_subval"], dataset.subval_targets.numpy())
+np.save(OUTPUT_CONFIG["normalization_params"]["target_scaler_divval"], dataset.divval_targets.numpy())
+np.save(OUTPUT_CONFIG["normalization_params"]["input_scaler_subval"], dataset.subval_inputs.numpy())
+np.save(OUTPUT_CONFIG["normalization_params"]["input_scaler_divval"], dataset.divval_inputs.numpy())
 
 # Split data into training and validation sets
 from sklearn.model_selection import train_test_split
 X_train, X_valid, _, _ = train_test_split(
-    dataset.inputs, dataset.targets, train_size=train_fraction, shuffle=True, random_state=config["seed"]
+    dataset.inputs, 
+    dataset.targets,
+    train_size=train_fraction,
+    shuffle=True,
+    random_state=seed
 )
 
-# Use PreloadedDataset instead of Dataset
+# -- use PreloadedDataset to efficiently serve already-normalized, pre-split data to model, 
+#  avoiding repeated normalization or transformation. -- #
 train_dataset = PreloadedDataset(X_train, X_train, norm_inputs=False, norm_targets=False)
 valid_dataset = PreloadedDataset(X_valid, X_valid, norm_inputs=False, norm_targets=False)
 
-# Create DataLoader for training and validation
-train_loader = DataLoader(train_dataset,
-                          batch_size=batch_size,
-                          shuffle=True,
-                          num_workers=0,
-                          pin_memory=False)
+train_sampler = DistributedSampler(train_dataset) if use_ddp else None
+valid_sampler = DistributedSampler(valid_dataset, shuffle=False) if use_ddp else None
 
-valid_loader = DataLoader(valid_dataset,
-                          batch_size=batch_size,
-                          shuffle=False,
-                          num_workers=0,
-                          pin_memory=False)
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=batch_size,
+    sampler=train_sampler,
+    num_workers=4,
+    pin_memory=True,
+    drop_last=use_ddp  # Ensure all ranks have the same number of batches in DDP
+)
+valid_loader = DataLoader(
+    valid_dataset,
+    batch_size=batch_size,
+    sampler=valid_sampler,
+    num_workers=4,
+    pin_memory=True,
+    drop_last=use_ddp  # For strict DDP validation, though not always required
+)
 
 # -- Model initialization -- #
+input_shape = tuple(MODEL_CONFIG.get("input_shape", [1, INPUT_DATA.shape[-1]]))
+if input_shape[-1] != INPUT_DATA.shape[-1]:
+    logging.warning(f"input_shape[-1] ({input_shape[-1]}) does not match input data shape ({INPUT_DATA.shape[-1]}). Overriding input_shape to match data.")
+    input_shape = (input_shape[0], INPUT_DATA.shape[-1])
+
 model = NeuralNetwork(
     model_type=model_type,
-    input_shape=(1, input_data.shape[-1]),
+    input_shape=input_shape,
     embed_dim=embed_dim,
     encoder_channels=encoder_channels,
     decoder_channels=decoder_channels,
     activation_fn=activation_fn,
     kernel_size=kernel_size,  # Pass kernel size to the model
     use_pooling=True,
-    device=device,
+    device=DEVICE,
 )
-model.to(device)
+model.to(DEVICE)
 
-# Define loss function
-loss_function = MSELoss()
+# -- DDP or DataParallel setup -- #
+if use_ddp:
+    model = DDP(model, device_ids=[local_rank])
+elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
+    logging.info(f"Using DataParallel on {torch.cuda.device_count()} GPUs")
+    model = DataParallel(model)
 
-# Initialize utilities
-save_best_model = SaveBestModel(best_model_name=config["output"]["model_name"])
+# -- Define loss function --#
+LOSS_FUNCTION = MSELoss()
+
+# -- Callbacks and utilities -- #
+model_name_base, model_name_ext = os.path.splitext(OUTPUT_CONFIG["model_name"])
+model_save_path = f"{model_name_base}_{RUN_ID}{model_name_ext}"
+save_best_model = SaveBestModel(best_model_name=model_save_path)
 early_stopping = EarlyStopping(patience=early_stopping_config["patience"], min_delta=early_stopping_config["delta"])
 
-# Create a folder to save reconstructed outputs
+# -- Create output directory for reconstructed outputs -- #
 output_folder = "./data/reconstructed_outputs"
 os.makedirs(output_folder, exist_ok=True)
 
-stats_file = config["output"]["stats_file"]
+stats_file = OUTPUT_CONFIG["stats_file"]
 with open(stats_file, "w") as f:
     f.write("epoch,train_loss,val_loss\n")  # Write header
 
-# Save the model architecture to a file
-model_architecture_file = config["output"]["model_architecture_file"]
+model_architecture_file = OUTPUT_CONFIG["model_architecture_file"]
 with open(model_architecture_file, "w") as f:
     f.write(str(model))  # Save the model architecture
 
-def train_autoencoder(model, train_loader, valid_loader, training_params, utilities, device, loss_function):
+def train_autoencoder(model, train_loader, valid_loader, training_params, utilities, device, loss_function, start_epoch=0):
     """Encapsulates the training logic for the autoencoder."""
     max_epochs = training_params['max_epochs']
     min_epochs = training_params['min_epochs']
@@ -150,10 +209,12 @@ def train_autoencoder(model, train_loader, valid_loader, training_params, utilit
         lr_scheduler = None
         logging.info("Learning rate scheduler disabled")
 
-    scaler = GradScaler()  # Initialize gradient scaler for mixed precision
+    scaler = torch.amp.GradScaler()  # Initialize gradient scaler for mixed precision
     learn_rate = []  # Initialize list to track learning rates
 
-    for epoch in range(max_epochs):
+    for epoch in range(start_epoch,max_epochs):
+        if use_ddp:
+            train_loader.sampler.set_epoch(epoch)
         t0 = time.time()  # Start timer for epoch
         model.train()
         total_loss = 0
@@ -162,9 +223,9 @@ def train_autoencoder(model, train_loader, valid_loader, training_params, utilit
             optimizer.zero_grad(set_to_none=True)  # Zero gradients
 
             # Use autocast for mixed precision
-            with autocast():
-                reconstructed, _ = model(x)
-                loss = loss_function(reconstructed, x)
+            with torch.amp.autocast(device_type='cuda' if device.type == 'cuda' else 'cpu'):
+                recon, embed = model(x)
+                loss = loss_function(recon, x)
 
             # Scale the loss and backpropagate
             scaler.scale(loss).backward()
@@ -181,9 +242,9 @@ def train_autoencoder(model, train_loader, valid_loader, training_params, utilit
         with torch.no_grad():
             for x, _ in valid_loader:
                 x = x.to(device)
-                with autocast():
-                    reconstructed, _ = model(x)
-                    loss = loss_function(reconstructed, x)
+                with torch.amp.autocast(device_type='cuda' if device.type == 'cuda' else 'cpu'):
+                    recon, embed = model(x)
+                    loss = loss_function(recon, x)
                 val_loss += loss.item()
 
         logging.info(f"Validation Loss: {val_loss:.4f}")
@@ -226,6 +287,24 @@ def train_autoencoder(model, train_loader, valid_loader, training_params, utilit
 
 # Run the training function
 if __name__ == "__main__":
+
+    start_epoch = 0
+    continue_from_checkpoint = False
+    if continue_from_checkpoint:
+        # Path to your checkpoint file
+        checkpoint_path = "models/best_autoencoder_model.pt"  # or your specific checkpoint
+
+        # Load checkpoint (use map_location if on CPU)
+        checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
+
+        # Load model and optimizer state
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer = torch.optim.Adam(model.parameters())  # Use same optimizer type as before
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Set the starting epoch
+        start_epoch = checkpoint['epoch'] + 1
+
     train_autoencoder(
         model=model,
         train_loader=train_loader,
@@ -234,19 +313,30 @@ if __name__ == "__main__":
             'max_epochs': max_epochs,
             'min_epochs': min_epochs,
             'lrate': lrate,
-            'scheduled_lr': training_config.get("scheduled_lr", True)
+            'scheduled_lr': TRAINING_CONFIG.get("scheduled_lr", True),
+            'start_epoch': start_epoch
         },
         utilities={
             'early_stopping': early_stopping,
             'save_best_model': save_best_model
         },
-        device=device,
-        loss_function=loss_function
+        device=DEVICE,
+        loss_function=LOSS_FUNCTION
     )
 
-    # Apply JIT tracing after training
-    example_input = torch.randn(1, 1, input_data.shape[-1]).to(device)  # Adjust shape as needed
-    traced_model = model.apply_jit(example_input)
-    traced_model_path = config["output"].get("traced_model_name", "./models/traced_autoencoder_model.pt")
-    traced_model.save(traced_model_path)
-    logging.info(f"Traced model saved to {traced_model_path}")
+    # -- Apply JIT tracing after training (only on rank 0 for DDP) -- #
+    if not use_ddp or (use_ddp and (not dist.is_initialized() or dist.get_rank() == 0)):
+        dummy_input = torch.randn(1, *input_shape).to(DEVICE)
+
+        # JIT trace using the underlying module if wrapped in DataParallel/DDP
+        base_model = model.module if (isinstance(model, DataParallel) or isinstance(model, DDP)) else model
+        traced_model = base_model.apply_jit(dummy_input)
+
+        # Save traced model
+        traced_model_path = os.path.join("./models", f"traced_autoencoder_model_{RUN_ID}.pt")
+        traced_model.save(traced_model_path)
+        logging.info(f"Traced model saved to {traced_model_path}")
+
+    # Clean up DDP
+    if use_ddp and dist.is_initialized():
+        dist.destroy_process_group()

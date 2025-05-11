@@ -59,7 +59,6 @@ class NeuralNetwork(nn.Module):
             self.bottleneck = build_bottleneck(
                 flat_dim=self.flat_dim,
                 embed_dim=self.embed_dim,
-                num_encoder_final_channels=self.num_encoder_final_channels
             )
             self.decoder = build_decoder(
                 [encoder_channels[-1]] + decoder_channels,

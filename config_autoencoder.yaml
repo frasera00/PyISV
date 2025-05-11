@@ -1,40 +1,43 @@
 # Configuration file for PyISV - Autoencoder
 
+# Experiment metadata
+experiment_name: "default_autoencoder_run"
+description: "Baseline autoencoder training for RDF images."
+notes: "Set USE_DDP=1 for distributed training. Adjust embed_dim, batch_size, and learning_rate for sweeps."
+
 # General settings
-device: "cpu"  # Options: "cuda", "cpu"
 seed: 42
 
 # Model settings
 model:
   type: "autoencoder"     # Options: "autoencoder", "classifier"
-  input_shape: [1, 340]   # Updated input shape for 1D convolutions
-  encoder_channels: [8, 16, 32, 64, 64, 128, 128]  # Updated to match the Autoencoder class
-  decoder_channels: [128, 64, 64, 32, 16, 8]  # Updated to match the Autoencoder class
+  input_shape: [1, 320]   # number of channels, number of bins
+  encoder_channels: [8, 16, 32, 64, 64, 128, 128]
+  decoder_channels: [128, 128, 64, 64, 32, 16, 8]
   activation_fn: "ReLU"
   embed_dim: 2            # Bottleneck size
-  kernel_size: 5  # Kernel size used in the Autoencoder class
+  kernel_size: 3          # Kernel size used in convolutional layers
 
 # Training settings
 training:
-  batch_size: 64          # Batch size
+  batch_size: 256         # Batch size for training
   train_fraction: 0.8
   min_epochs: 75   
-  max_epochs: 250
-  learning_rate: 0.005
-  scheduled_lr: True     # Use learning rate scheduler
+  max_epochs: 350
+  learning_rate: 0.002
+  scheduled_lr: True      # Use learning rate scheduler
   early_stopping:
     patience: 10
     delta: 0.00005
-  loss: "MSE"             # Options: "MSE", "RMSE"
+  use_ddp: True            # Use Distributed Data Parallel
+  num_workers: 4           # Number of workers for data loading
+  pin_memory: True         # Load data into memory for faster access
 
 # Data settings
 input:
   path: "./data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
   target_path: null                  # Autoencoder uses the same input as target
   normalization: "minmax"            # Options: "minmax", "gaussian"
-  padding:
-    enabled: false
-    final_size: 32
 
 # Output settings
 output:

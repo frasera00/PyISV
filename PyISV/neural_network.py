@@ -1,61 +1,61 @@
+# -*- coding: utf-8 -*-
+
+# Import necessary libraries
 import torch
 import torch.nn as nn
 import torch.jit
-import numpy as np
+
+# Import custom modules
 from PyISV.model_building import build_encoder, build_decoder, build_bottleneck, build_classification_head
+from PyISV.train_utils import InvalidModelTypeError
+
+# Import training and validation helpers
+from PyISV.training_helpers import *
+from PyISV.validation_helpers import *
 
 class NeuralNetwork(nn.Module):
-    # --- Utility: shape assertion for debugging ---
-    def _assert_shape(self, tensor, expected_shape, name="Tensor"):
-        if tensor.shape != expected_shape:
-            raise ValueError(f"{name} shape {tensor.shape} does not match expected {expected_shape}")
-
-    # --- Utility: move model to device and update self.device ---
-    def move_to(self, device):
-        self.device = torch.device(device)
-        self.to(self.device)
-        return self
-
     """
     NeuralNetwork class for Autoencoder and Classifier.
     Includes methods for building, training, and evaluating the model.
     """
-    def __init__(self, model_type, input_shape, embed_dim=2, num_classes=None, 
-                 encoder_channels=None, decoder_channels=None, kernel_size=5,
-                 activation_fn=nn.ReLU, use_pooling=True, device='cpu'):
+
+    # Initialization of the NeuralNetwork class
+    def __init__(self, config: dict):
         super(NeuralNetwork, self).__init__()
 
         # Validate input parameters
+        model_type = config.get("type")
+        encoder_channels = config.get("encoder_channels")
+        decoder_channels = config.get("decoder_channels")
         if model_type == "classifier" and encoder_channels is None:
             raise ValueError("Encoder channels must be specified for classifier.")
-        if model_type == "autoencoder" and (encoder_channels is None or decoder_channels is None):
+        if self._autoencoder_channels_missing(model_type, encoder_channels, decoder_channels):
             raise ValueError("Encoder and decoder channels must be specified for autoencoder.")
-
-        self.device = torch.device(device)  # Default to CPU; can be updated during training
+    
+        self.device = config.get("device", "cpu")
         self.model_type = model_type
-        self.embed_dim = embed_dim
-        self.num_classes = num_classes
-        self.activation_fn = activation_fn
-        self.use_pooling = use_pooling
-        self.kernel_size = kernel_size
+        self.embed_dim = config.get("embed_dim")
+        self.num_classes = config.get("num_classes")
+        self.use_pooling = config.get("use_pooling")
+        self.kernel_size = config.get("kernel_size")
+        self.activation_fn = config.get("activation_fn")
 
         # Calculate num_encoder_final_channels internally based on encoder_channels
         self.num_encoder_final_channels = encoder_channels[-1]
 
         # Infer spatial dimension dynamically from input shape
-        # Dynamically infer flat_dim using a dummy input tensor
-        dummy_input = torch.zeros(1, input_shape[0], input_shape[1])  # Batch size 1, input channels, input length
+        input_shape = config.get("input_shape")
+        dummy_input = torch.zeros(1, input_shape[0], input_shape[1])
         dummy_output = build_encoder(input_shape[0], encoder_channels, self.activation_fn, kernel_size=self.kernel_size)(dummy_input)
-        self.flat_dim = dummy_output.size(1) * dummy_output.size(2)  # Channels * spatial dimension
+        self.flat_dim = dummy_output.size(1) * dummy_output.size(2)
 
         if self.model_type == "autoencoder":
             self.encoder = build_encoder(
-                input_shape[0],          # input_channels
-                encoder_channels,        # encoder_channels
-                self.activation_fn,           # activation_fn
-                kernel_size=self.kernel_size,  # Pass kernel size
+                input_shape[0],
+                encoder_channels,
+                self.activation_fn,
+                kernel_size=self.kernel_size,
             )
-            # Ensure bottleneck input size matches encoder output
             self.bottleneck = build_bottleneck(
                 flat_dim=self.flat_dim,
                 embed_dim=self.embed_dim,
@@ -63,8 +63,8 @@ class NeuralNetwork(nn.Module):
             self.decoder = build_decoder(
                 [encoder_channels[-1]] + decoder_channels,
                 self.activation_fn,
-                output_length=input_shape[1],  # Pass the original input length to the decoder
-                kernel_size=self.kernel_size  # Pass kernel size
+                output_length=input_shape[1],
+                kernel_size=self.kernel_size
             )
         elif self.model_type == "classifier":
             self.encoder = build_encoder(
@@ -81,12 +81,14 @@ class NeuralNetwork(nn.Module):
                 dropout=None
             )
         else:
-            raise ValueError("Invalid model_type. Choose from 'autoencoder' or 'classifier'.")
-
+            raise InvalidModelTypeError()
+  
+    # --- Forward pass ---
     def forward(self, x):
-        # Assert input shape for debugging
-        expected_shape = (x.size(0), self.encoder[0].in_channels, x.size(2))
-        self._assert_shape(x, expected_shape, name="Input")
+        # Assert input shape for debugging (avoid in tracing)
+        if not torch.jit.is_tracing():
+            expected_shape = (x.size(0), self.encoder[0].in_channels, x.size(2))
+            assert_shape(x, expected_shape, name="Input")
         
         if self.model_type == "autoencoder":
             z = self.encoder(x)
@@ -98,8 +100,8 @@ class NeuralNetwork(nn.Module):
             z_out = z_bottleneck.view(z.size(0), self.num_encoder_final_channels, new_flat_dim)  # Correctly reshape for decoder
 
             reconstructed = self.decoder(z_out)
-            self._assert_shape(reconstructed, x.shape, name="Reconstructed")
-            
+            if not torch.jit.is_tracing():
+                assert_shape(reconstructed, x.shape, name="Reconstructed")
             return reconstructed, z_out
         
         elif self.model_type == "classifier":
@@ -108,166 +110,155 @@ class NeuralNetwork(nn.Module):
             logits = self.classification_head(z)
             return logits
         else:
-            raise ValueError("Invalid model_type. Choose from 'autoencoder' or 'classifier'.")
+            raise InvalidModelTypeError()
 
-    def train_model(self, train_loader, val_loader=None, epochs=10,
-                    lr=1e-3, weight_decay=0, device='cpu', criterion=None, 
-                    use_separate_target=False, amp=False, grad_clip=None, 
-                    scheduler=None, early_stopping=None, checkpoint_path=None, 
-                    log_interval=5):
+    # --- Training and Evaluation Methods ---
+    def train_model(self, train_loader, val_loader=None, config=None):
         """
-        Train the model using the provided data loaders.
+        Train the model using the provided data loaders and a configuration dictionary.
 
         Parameters:
         - train_loader: DataLoader for training data.
         - val_loader: DataLoader for validation data (optional).
-        - epochs: Number of training epochs.
-        - lr: Learning rate.
-        - weight_decay: Weight decay for the optimizer.
-        - device: Device to run the training on ('cpu' or 'cuda').
-        - criterion: Loss function to use (default: CrossEntropyLoss for classifier, MSELoss for autoencoders).
-        - use_separate_target: If True, use the target dataset (y) for the loss function instead of the input data (x).
-        - amp: If True, use automatic mixed precision (AMP) for faster training on GPUs.
-        - grad_clip: If set, clip gradients to this value.
-        - scheduler: Learning rate scheduler (optional). Supports schedulers that require validation loss (e.g., ReduceLROnPlateau) or standard schedulers.
-        - early_stopping: Early stopping callback that takes validation loss and returns True if training should stop (optional).
-        - checkpoint_path: If set, save model checkpoints to this path after each epoch (optional).
-        - log_interval: Print training progress every log_interval epochs.
+        - config: Dictionary containing training configuration.
         """
+
+        # Persistent attributes
+        self.device = config['device']
+        self._move_to(self.device)
+        self.amp = config['amp']
         
-        self.move_to(device)
-        if criterion is None:
-            criterion = nn.CrossEntropyLoss() if self.model_type == "classifier" else nn.MSELoss()
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
-        scaler = torch.cuda.amp.GradScaler() if amp else None
-        for epoch in range(epochs):
+        # Training parameters
+        model_type = config['model_type']
+        grad_clip = config['grad_clip']
+        use_separate_target = config['use_separate_target']
+        early_stopping = config['early_stopping']
+        checkpoint_path = config['checkpoint_path']
+        min_epochs = config.get('min_epochs', 1)
+        max_epochs = config.get('max_epochs', config['epochs'])
+        scheduler = config.get('scheduler', None)
+
+        # Initialize criterion and optimizer before scheduler
+        criterion = config['criterion']
+        optimizer = torch.optim.Adam(self.parameters(), lr=config['learning_rate'], weight_decay=config['weight_decay'])
+        scaler = torch.cuda.amp.GradScaler() if self.amp else None
+
+        # Create scheduler if config provides scheduler_cfg
+        scheduler_cfg = config.get('scheduler_cfg', None)
+        if scheduler_cfg is not None:
+            if scheduler_cfg["type"] == "MultiStepLR":
+                scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                    optimizer,
+                    milestones=scheduler_cfg.get("milestones", [100, 250]),
+                    gamma=scheduler_cfg.get("gamma", 0.5)
+                )
+            # Add more scheduler types here as needed
+
+        best_model_callback = config.get('best_model_callback', None) if config else None
+        best_val_loss = float('inf')
+        epoch = 0
+        stop = False
+        while epoch < max_epochs and not stop:
             self.train()
-            total_loss = 0
-            correct = 0
-            total = 0
+            total_loss, correct, total = 0, 0, 0
+
             for x, y in train_loader:
                 x, y = x.to(self.device), y.to(self.device)
                 optimizer.zero_grad()
 
-                if amp:
-                    with torch.cuda.amp.autocast():
-                        if self.model_type == "classifier":
-                            outputs = self.forward(x)
-                            loss = criterion(outputs, y)
-                            _, predicted = torch.max(outputs, 1)
-                            correct += (predicted == y).sum().item()
-                            total += y.size(0)
-                        else:
-                            reconstructed, _ = self.forward(x)
-                            loss = criterion(reconstructed, y if use_separate_target else x)
+                # Unified batch logic
+                if model_type == "classifier":
+                    batch_fn = train_classifier_batch
+                elif model_type == "autoencoder":
+                    batch_fn = train_autoencoder_batch
                 else:
-                    if self.model_type == "classifier":
-                        outputs = self.forward(x)
-                        loss = criterion(outputs, y)
-                        _, predicted = torch.max(outputs, 1)
-                        correct += (predicted == y).sum().item()
-                        total += y.size(0)
-                    else:
-                        reconstructed, _ = self.forward(x)
-                        loss = criterion(reconstructed, y if use_separate_target else x)
+                    raise InvalidModelTypeError()
 
-                if amp:
+                if self.amp:
+                    with torch.cuda.amp.autocast():
+                        loss, batch_correct, batch_total = batch_fn(self, x, y)
                     scaler.scale(loss).backward()
-                    if grad_clip is not None:
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip)
+                    clip_gradients(self)
                     scaler.step(optimizer)
                     scaler.update()
                 else:
+                    loss, batch_correct, batch_total = batch_fn(self, x, y)
                     loss.backward()
-                    if grad_clip is not None:
-                        torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip)
+                    clip_gradients(self)
                     optimizer.step()
 
                 total_loss += loss.item()
-
+                if self.model_type == "classifier":
+                    correct += batch_correct
+                    total += batch_total
 
             val_loss = None
             if val_loader:
-                val_loss = self.validate(val_loader, criterion, use_separate_target)
+                val_loss = self.validate(val_loader)
 
-            # Scheduler step: handle ReduceLROnPlateau and others
-            if scheduler is not None:
-                if hasattr(scheduler, 'step') and 'ReduceLROnPlateau' in scheduler.__class__.__name__:
-                    # For ReduceLROnPlateau, step with validation loss
-                    if val_loss is not None:
-                        scheduler.step(val_loss)
-                else:
-                    scheduler.step()
+            # Save best model if callback is provided and val_loss improves
+            if best_model_callback is not None and val_loss is not None:
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_model_callback(val_loss, total_loss, epoch, self, self.optimizer)
 
-            if (epoch + 1) % log_interval == 0:
-                if self.model_type == "classifier":
-                    accuracy = correct / total if total > 0 else 0
-                    print(f"Epoch {epoch + 1}/{epochs}, Training Loss: {total_loss:.4f}, Accuracy: {accuracy * 100:.2f}%")
-                else:
-                    print(f"Epoch {epoch + 1}/{epochs}, Training Loss: {total_loss:.4f}")
+            # Scheduler step
+            scheduler_step(self, val_loss)
 
-            # Early stopping
-            if early_stopping is not None and val_loss is not None:
-                if early_stopping(val_loss):
-                    print(f"Early stopping at epoch {epoch + 1}")
-                    break
+            # Only allow early stopping after min_epochs
+            if epoch + 1 >= self.min_epochs:
+                if early_stop_and_checkpoint(self, val_loss, epoch):
+                    stop = True
+            epoch += 1
 
-            # Checkpointing
-            if checkpoint_path is not None and val_loss is not None:
-                torch.save(self.state_dict(), checkpoint_path)
-
-    def validate(self, val_loader, criterion, use_separate_target=False, scaler_subval=None, scaler_divval=None, save_outputs=False, encoder_only=False):
+    def validate(self, val_loader, config=None):
         """
         Validate the model using the provided validation data loader.
 
         Parameters:
         - val_loader: DataLoader for validation data.
-        - criterion: Loss function to use.
-        - use_separate_target: If True, use the target dataset (y) for the loss function instead of the input data (x).
-        - scaler_subval: Subtraction value for input scaling (optional).
-        - scaler_divval: Division value for input scaling (optional).
-        - save_outputs: If True, save embeddings and reconstructed outputs to files.
-        - encoder_only: If True, only evaluate the encoder and save bottleneck embeddings.
+        - config: Dictionary containing validation configuration.
         """
+        if config is None:
+            config = {}
+        criterion = config.get('criterion', getattr(self, 'criterion', None))
+        use_separate_target = config.get('use_separate_target', getattr(self, 'use_separate_target', False))
+        scaler_subval = config.get('scaler_subval', None)
+        scaler_divval = config.get('scaler_divval', None)
+        save_outputs = config.get('save_outputs', False)
+        encoder_only = config.get('encoder_only', False)
+
         self.eval()
-        total_loss = 0
-        correct = 0
-        total = 0
+        total_loss, correct, total = 0, 0, 0
         embeddings = []
         outputs = []
 
         with torch.no_grad():
-            for x, y in val_loader:
-                x, y = x.to(self.device), y.to(self.device)
-
-                # Scale inputs if scalers are provided
-                if scaler_subval is not None and scaler_divval is not None:
-                    x = (x - scaler_subval) / scaler_divval
-
-                if self.model_type == "classifier":
-                    outputs_batch = self.forward(x)
-                    loss = criterion(outputs_batch, y)
-                    _, predicted = torch.max(outputs_batch, 1)
-                    correct += (predicted == y).sum().item()
-                    total += y.size(0)
-                else:  # Autoencoder
-                    if encoder_only:
-                        embeddings_batch = self.encoder(x).view(x.size(0), -1).detach().cpu().numpy()
-                        embeddings.append(embeddings_batch)
+            if self.model_type == "classifier":
+                for x, y in val_loader:
+                    x, y = x.to(self.device), y.to(self.device)
+                    x = normalize_input(x, scaler_subval, scaler_divval)
+                    loss, batch_correct, batch_total = validate_classifier(self, x, y, criterion)
+                    correct += batch_correct
+                    total += batch_total
+                    total_loss += loss.item()
+            elif self.model_type == "autoencoder":
+                for x, y in val_loader:
+                    x, y = x.to(self.device), y.to(self.device)
+                    x = normalize_input(x, scaler_subval, scaler_divval)
+                    options = {
+                        "use_separate_target": use_separate_target,
+                        "encoder_only": encoder_only,
+                        "save_outputs": save_outputs,
+                        "embeddings": embeddings,
+                        "outputs": outputs,
+                    }
+                    loss, _, _ = validate_autoencoder(self, x, y, criterion, options)
+                    if loss is None:
                         continue
-
-                    reconstructed, bottleneck = self.forward(x)
-                    if use_separate_target:
-                        loss = criterion(reconstructed, y)
-                    else:
-                        loss = criterion(reconstructed, x)
-
-                    if save_outputs:
-                        outputs.append(reconstructed.detach().cpu().numpy())
-                        embeddings.append(bottleneck.detach().cpu().numpy())
-
-                total_loss += loss.item()
+                    total_loss += loss.item()
+            else:
+                raise InvalidModelTypeError()
 
         if self.model_type == "classifier":
             accuracy = correct / total if total > 0 else 0
@@ -275,12 +266,7 @@ class NeuralNetwork(nn.Module):
         else:
             print(f"Validation Loss: {total_loss:.4f}")
 
-        # Save outputs and embeddings if required
-        if save_outputs and len(embeddings) > 0:
-            np.save("embeddings.npy", np.vstack(embeddings))
-        if save_outputs and len(outputs) > 0:
-            np.save("reconstructed_outputs.npy", np.vstack(outputs))
-
+        save_validation_outputs(save_outputs, embeddings, outputs)
         return total_loss
 
     def evaluate(self, test_loader):
@@ -302,7 +288,12 @@ class NeuralNetwork(nn.Module):
         print(f"Test Accuracy: {accuracy * 100:.2f}%")
         return accuracy
 
-    def apply_jit(self, example_input):
-        """Applies JIT tracing to the model and returns the traced model."""
-        traced_model = torch.jit.trace(self, example_input)
-        return traced_model
+    # --- Utility Methods --- #
+    def _move_to(self, device):
+        self.device = torch.device(device)
+        self.to(self.device)
+        return self
+    
+    def _autoencoder_channels_missing(self, model_type, encoder_channels, decoder_channels):
+        """Return True if model_type is 'autoencoder' and encoder or decoder channels are missing."""
+        return model_type == "autoencoder" and (encoder_channels is None or decoder_channels is None)

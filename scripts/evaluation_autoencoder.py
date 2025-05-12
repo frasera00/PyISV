@@ -14,6 +14,16 @@ import re
 
 import torch
 
+# Get the absolute path to the PyISV root
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PYISV_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, '..'))
+
+# Build paths relative to the PyISV root:
+models_dir = os.path.join(PYISV_ROOT, 'models')
+data_dir = os.path.join(PYISV_ROOT, 'data')
+outputs_dir = os.path.join(PYISV_ROOT, 'outputs')
+norms_dir = os.path.join(PYISV_ROOT, 'norm_vals')
+stats_dir = os.path.join(PYISV_ROOT, 'stats')
 
 def plot_loss_curve(stats_file, out_dir):
     """Plot the training and validation loss curves."""
@@ -36,11 +46,11 @@ def evaluate_reconstructions(model, loader, device, loss_fn, out_dir):
         for x, _ in tqdm(loader, desc="Evaluating", leave=False):
             x = x.to(device)
             recon, latent = model(x)
-            errs = loss_fn(recon, x).detach().device.numpy()
+            errs = loss_fn(recon, x).detach().cpu().numpy()
             all_errors.append(np.atleast_1d(errs))
 
             # Flatten latent except batch dimension
-            embeddings.append(latent.detach().device.numpy().reshape(latent.shape[0], -1))
+            embeddings.append(latent.detach().cpu().numpy().reshape(latent.shape[0], -1))
     errors = np.concatenate(all_errors)
     embeds = np.concatenate(embeddings, axis=0)
 
@@ -64,35 +74,42 @@ def plot_reconstructions(model, input_data, device, selection=None):
     """Plot the model's reconstructions."""
 
     # Load the scaler values for normalization
-    output_scaler_subval = np.load("../norm_vals/target_autoen_scaler_subval.npy")
-    output_scaler_divval = np.load("../norm_vals/target_autoen_scaler_divval.npy")
+    output_scaler_subval = np.load(f"{norms_dir}/target_autoen_scaler_subval.npy")
+    output_scaler_divval = np.load(f"{norms_dir}/target_autoen_scaler_divval.npy")
 
-    # Reconstruct the input data
+    # Determine which samples to plot
     if selection is not None:
-        data_range = range(input_data.shape[0])
-    else:
         data_range = selection
+    else:
+        data_range = range(input_data.shape[0])
+
+    # Ensure output directory exists
+    recon_dir = os.path.join(outputs_dir, "reconstructed_RDFs")
+    os.makedirs(recon_dir, exist_ok=True)
 
     with torch.no_grad():
-        for i in data_range:  # Process up to 5 samples
-            input_signal = input_data[i].unsqueeze(0)  # Add batch dimension
-            reconstructed_signal, _ = model(input_signal)  # Extract the reconstructed signal
+        for i in data_range:
+            input_signal = input_data[i].unsqueeze(0).to(device)  # Add batch dimension and move to device
+            reconstructed_signal, _ = model(input_signal)
 
-            # pytorch tensor to numpy array
-            input_signal = input_signal.detach().device.numpy()
-            reconstructed_signal = reconstructed_signal.detach().device.numpy()
-            reconstructed_signal = (reconstructed_signal * output_scaler_divval) + output_scaler_subval
+            # Move tensors to CPU and convert to numpy
+            input_signal_np = input_signal.detach().cpu().numpy()
+            reconstructed_signal_np = reconstructed_signal.detach().cpu().numpy()
+            # Undo normalization
+            reconstructed_signal_np = (reconstructed_signal_np * output_scaler_divval) + output_scaler_subval
 
             # Plot and save the input and reconstructed signals
             fig, ax = plt.subplots()
-            ax.plot(input_signal.squeeze(), label="Input", color="blue")
-            ax.plot(reconstructed_signal.squeeze(), label="Reconstructed", color="orange")
+            ax.plot(input_signal_np.squeeze(), label="Input", color="blue")
+            ax.plot(reconstructed_signal_np.squeeze(), label="Reconstructed", color="orange")
             ax.legend()
             ax.set_title(f"Sample {i}")
             ax.set_xlabel("Index")
             ax.set_ylabel("Value")
-
-    fig.savefig(os.path.join("../outputs/reconstructed_RDFs", 'reconstructions.png'))
+            fig.tight_layout()
+            # Save each plot separately for clarity
+            fig.savefig(os.path.join(recon_dir, f'reconstruction_{i}.png'))
+            plt.close(fig)
     return
 
 def plot_loss_curve(stats_file):
@@ -102,7 +119,7 @@ def plot_loss_curve(stats_file):
     ax.plot(df['epoch'], df['val_loss'],   label='val')
     ax.set_xlabel('Epoch'); ax.set_ylabel('Loss')
     ax.legend(); plt.tight_layout()
-    fig.savefig(os.path.join("../outputs/evaluation", 'loss_curve.png'))
+    fig.savefig(os.path.join(f"{outputs_dir}/evaluation", 'loss_curve.png'))
 
 def evaluate_reconstructions(model, loader, device, loss_fn):
     model.eval()
@@ -113,11 +130,11 @@ def evaluate_reconstructions(model, loader, device, loss_fn):
         for x, _ in tqdm(loader, desc="Evaluating", leave=False):
             x = x.to(device)
             recon, latent = model(x)
-            errs = loss_fn(recon, x).detach().device.numpy()
+            errs = loss_fn(recon, x).detach().cpu().numpy()
             all_errors.append(np.atleast_1d(errs))
 
             # Flatten latent except batch dimension
-            embeddings.append(latent.detach().device.numpy().reshape(latent.shape[0], -1))
+            embeddings.append(latent.detach().cpu().numpy().reshape(latent.shape[0], -1))
     errors = np.concatenate(all_errors)
     embeds = np.concatenate(embeddings, axis=0)
 
@@ -132,12 +149,12 @@ def evaluate_reconstructions(model, loader, device, loss_fn):
     axes[1].scatter(z2d[:,0], z2d[:,1], s=5, alpha=0.6)
     axes[1].set_title('Latent space t-SNE'); plt.tight_layout()
 
-    fig.savefig(os.path.join('../outputs/evaluation', 'latent_tsne.png'))
+    fig.savefig(os.path.join(f"{outputs_dir}/evaluation", 'latent_tsne.png'))
     return errors, embeds
 
 def main():
     # -- Load the architecture of the model -- #
-    with open('../models/autoencoder_architecture.txt') as f:
+    with open(f"{models_dir}/autoencoder_architecture.txt") as f:
         lines = f.read()
 
     # -- Extract model parameters from the architecture -- #
@@ -153,20 +170,20 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # -- Create the model -- #
-    model = NeuralNetwork(
-        model_type="autoencoder",
-        input_shape=input_shape,
-        embed_dim=embed_dim,
-        encoder_channels=encoder_channels,
-        decoder_channels=decoder_channels,
-        activation_fn=activation_fn,
-        kernel_size=kernel_size,
-        use_pooling=use_pooling,
-        device=device,
-    )
+    model = NeuralNetwork({
+        "type": "autoencoder",
+        "input_shape": input_shape,
+        "embed_dim": embed_dim,
+        "encoder_channels": encoder_channels,
+        "decoder_channels": decoder_channels,
+        "activation_fn": activation_fn,
+        "kernel_size": kernel_size,
+        "use_pooling": use_pooling,
+        "device": device,
+    })
 
     # -- Load the saved state dictionary -- #
-    model_path = "../models/best_autoencoder_model.pt"  # Replace with your model path
+    model_path = f"{models_dir}/best_autoencoder_model_20250512_132414.pt"  # Replace with your model path
     checkpoint = torch.load(model_path, map_location=device)
     state_dict = checkpoint["model_state_dict"]
 
@@ -185,18 +202,18 @@ def main():
     model.to(device)
     
     # -- Load the input data for evaluation -- #
-    path = "../data/RDFs/rdf_images.pt"
+    path = f"{data_dir}/RDFs/rdf_images.pt"
     target_path = None
     inputs = torch.load(path).float()
     targets = torch.load(target_path).float() if target_path else inputs.clone()
-    print(f"Input shape: {inputs.shape}")
+    #print(f"Input shape: {inputs.shape}")
 
     # -- Plot the model's reconstructions and training curves -- #
     plot_reconstructions(model, inputs, device, selection=[1,100,10000,70000])
-    plot_loss_curve("../stats/train_autoencoder_stats.txt")
+    plot_loss_curve(f"{stats_dir}/train_autoencoder_stats.txt")
 
     # -- Load the input data for evaluation -- #
-    path = "../data/RDFs/rdf_images.pt"
+    path = f"{data_dir}/RDFs/rdf_images.pt"
     target_path = None
     inputs = torch.load(path).float()
     targets = torch.load(target_path).float() if target_path else inputs.clone()
@@ -224,8 +241,8 @@ def main():
     errors, embeds = evaluate_reconstructions(model, val_loader, device, loss_fn)
 
     # -- Save the errors and embeddings -- #
-    np.save(os.path.join("../outputs/evaluation", 'recon_errors.npy'), errors)
-    np.save(os.path.join("../outputs/evaluation", 'latent_embeddings.npy'), embeds)
+    np.save(os.path.join(f"{outputs_dir}/evaluation", 'recon_errors.npy'), errors)
+    np.save(os.path.join(f"{outputs_dir}/evaluation", 'latent_embeddings.npy'), embeds)
 
 if __name__ == "__main__":
     main()

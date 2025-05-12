@@ -3,6 +3,7 @@
 *.pyc
 *.pyo
 *.py[oc]
+*.npy
 
 # Ignore trace files
 ./logs/profiler/*.json
@@ -31,8 +32,8 @@ wheels/
 # Ignore macOS system files
 *.DS_Store
 
-# Ignore scripts to run in clusters:
-run_mono.sh
+# Ignore bash scripts:
+*.sh
 
 # Ignore vscode files
 *.vscode

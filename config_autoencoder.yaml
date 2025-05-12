@@ -1,12 +1,14 @@
 # Configuration file for PyISV - Autoencoder
 
-# Experiment metadata
+# General settings and metadata
 experiment_name: "default_autoencoder_run"
 description: "Baseline autoencoder training for RDF images."
-notes: "Set USE_DDP=1 for distributed training. Adjust embed_dim, batch_size, and learning_rate for sweeps."
+notes: "Set use_ddp=True for distributed training. Adjust embed_dim, batch_size, and learning_rate for sweeps."
 
-# General settings
-seed: 42
+general:
+  device: "auto"
+  seed: 42
+  apply_jit_tracing: False # Use JIT tracing for model optimization
 
 # Model settings
 model:
@@ -17,6 +19,7 @@ model:
   activation_fn: "ReLU"
   embed_dim: 2            # Bottleneck size
   kernel_size: 3          # Kernel size used in convolutional layers
+  use_pooling: True       # Use pooling layers in the model
 
 # Training settings
 training:
@@ -29,24 +32,24 @@ training:
   early_stopping:
     patience: 10
     delta: 0.00005
-  use_ddp: True            # Use Distributed Data Parallel
   num_workers: 4           # Number of workers for data loading
   pin_memory: True         # Load data into memory for faster access
+  use_ddp: True            # Use Distributed Data Parallel
 
 # Data settings
 input:
-  path: "./data/RDFs/rdf_images.pt"  # Path for the input dataset for autoencoder
-  target_path: null                  # Autoencoder uses the same input as target
-  normalization: "minmax"            # Options: "minmax", "gaussian"
+  dataset: "rdf_images.pt"      # Name of the input dataset for autoencoder
+  target: null                  # Autoencoder uses the same input as target
+  normalization: "minmax"       # Options: "minmax", "gaussian"
 
 # Output settings
 output:
-  model_name: "./models/best_autoencoder_model.pt"
-  log_file: "./logs/train_autoencoder_log.txt"
-  stats_file: "./stats/train_autoencoder_stats.txt"
-  model_architecture_file: "./models/autoencoder_architecture.txt"
+  model_name: "best_autoencoder_model.pt"
+  log_file: "train_autoencoder_log.txt"
+  stats_file: "train_autoencoder_stats.txt"
+  model_architecture_file: "autoencoder_architecture.txt"
   normalization_params:
-    input_scaler_subval: "norm_vals/input_autoen_scaler_subval.npy"
-    input_scaler_divval: "norm_vals/input_autoen_scaler_divval.npy"
-    target_scaler_subval: "norm_vals/target_autoen_scaler_subval.npy"
-    target_scaler_divval: "norm_vals/target_autoen_scaler_divval.npy"
+    divval_inputs: "input_autoen_scaler_subval.npy"
+    subval_inputs: "input_autoen_scaler_divval.npy"
+    divval_targets: "target_autoen_scaler_subval.npy"
+    subval_targets: "target_autoen_scaler_divval.npy"

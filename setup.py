@@ -10,7 +10,8 @@ setup(
         'torchsummary',
         'scikit-learn',
         'ase',
-        'tqdm'
+        'tqdm',
+        'openTSNE',
     ],
     author='Emanuele Telari, Fabio Rasera',
     author_email='telariemanuele@gmail.com, fabiorasera00@gmail.com',

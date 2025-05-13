@@ -7,7 +7,7 @@ import torch.jit
 
 # Import custom modules
 from PyISV.model_building import build_encoder, build_decoder, build_bottleneck, build_classification_head
-from PyISV.train_utils import InvalidModelTypeError
+from PyISV.training_utils import InvalidModelTypeError
 
 # Import training and validation helpers
 from PyISV.training_helpers import *

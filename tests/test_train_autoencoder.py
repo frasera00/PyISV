@@ -13,6 +13,14 @@ class TestModelTrainingScript(unittest.TestCase):
 
         import scripts.train_autoencoder as ta
         ta.use_ddp = False
+        ta.pin_memory = False
+        ta.num_workers = 0
+        
+        # Patch output paths to avoid overwriting real outputs
+        ta.RUN_ID = "TEST_RUN_ID"
+        ta.model_save_path = f"test_{ta.model_save_path}"
+        ta.stats_file = f"test_{ta.stats_file}"
+        ta.model_architecture_file = f"test_{ta.model_architecture_file}"
         importlib.reload(ta)
 
         # Ensure the model is initialized correctly

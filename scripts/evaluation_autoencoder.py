@@ -1,18 +1,32 @@
-from openTSNE import TSNE
-from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader
-from PyISV.train_utils import PreloadedDataset, MSELoss
-from PyISV.neural_network import NeuralNetwork 
-from collections import OrderedDict
-from tqdm import tqdm 
+# This script evaluates the autoencoder model by plotting the training loss curve,
+# reconstructing the input data, and visualizing the latent space using t-SNE.
 
+# ----------------- Load modules -------------------- #
+
+# Import necessary libraries
+import torch
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
 import re
 
-import torch
+# Import functions from external libraries
+from openTSNE import TSNE
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
+from collections import OrderedDict
+from tqdm import tqdm 
+
+# Import custom modules
+from PyISV.training_utils import PreloadedDataset, MSELoss
+from PyISV.neural_network import NeuralNetwork 
+
+# ------------ Set paths to directories ------------- #
+
+# Set the run ID for the current evaluation.
+# Should match the run ID used during training
+RUN_ID = "20250512_195715"
 
 # Get the absolute path to the PyISV root
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,94 +39,11 @@ outputs_dir = os.path.join(PYISV_ROOT, 'outputs')
 norms_dir = os.path.join(PYISV_ROOT, 'norm_vals')
 stats_dir = os.path.join(PYISV_ROOT, 'stats')
 
-def plot_loss_curve(stats_file, out_dir):
-    """Plot the training and validation loss curves."""
-    df = pd.read_csv(stats_file)
-    fig, ax = plt.subplots(1,1)
-    ax.plot(df['epoch'], df['train_loss'], label='train')
-    ax.plot(df['epoch'], df['val_loss'],   label='val')
-    ax.set_xlabel('Epoch'); ax.set_ylabel('Loss')
-    ax.legend(); plt.tight_layout()
-    fig.savefig(os.path.join(out_dir, 'loss_curve.png'))
-    return
-
-def evaluate_reconstructions(model, loader, device, loss_fn, out_dir):
-    """Evaluate the model's reconstruction performance and visualize the latent space."""
-    model.eval()
-    all_errors = []
-    embeddings = []
-
-    with torch.no_grad():
-        for x, _ in tqdm(loader, desc="Evaluating", leave=False):
-            x = x.to(device)
-            recon, latent = model(x)
-            errs = loss_fn(recon, x).detach().cpu().numpy()
-            all_errors.append(np.atleast_1d(errs))
-
-            # Flatten latent except batch dimension
-            embeddings.append(latent.detach().cpu().numpy().reshape(latent.shape[0], -1))
-    errors = np.concatenate(all_errors)
-    embeds = np.concatenate(embeddings, axis=0)
-
-
-    # Histogram of errors
-    fig, axes = plt.subplots(1,2)
-    axes[0].hist(errors, bins=50, alpha=0.7)
-    axes[0].set_xlabel('Reconstruction RMSE'); axes[0].set_ylabel('Count')
-
-    # Run t-SNE (openTSNE is much faster)
-    tsne = TSNE(n_jobs=4, random_state=0)  # n_jobs sets the number of CPU cores
-    z2d = tsne.fit(embeds)
-    axes[1].scatter(z2d[:,0], z2d[:,1], s=5, alpha=0.6)
-    axes[1].set_title('Latent space t-SNE'); plt.tight_layout()
-    
-    fig.savefig(os.path.join(out_dir, 'latent_tsne.png'))
-
-    return errors, embeds
-
-def plot_reconstructions(model, input_data, device, selection=None):
-    """Plot the model's reconstructions."""
-
-    # Load the scaler values for normalization
-    output_scaler_subval = np.load(f"{norms_dir}/target_autoen_scaler_subval.npy")
-    output_scaler_divval = np.load(f"{norms_dir}/target_autoen_scaler_divval.npy")
-
-    # Determine which samples to plot
-    if selection is not None:
-        data_range = selection
-    else:
-        data_range = range(input_data.shape[0])
-
-    # Ensure output directory exists
-    recon_dir = os.path.join(outputs_dir, "reconstructed_RDFs")
-    os.makedirs(recon_dir, exist_ok=True)
-
-    with torch.no_grad():
-        for i in data_range:
-            input_signal = input_data[i].unsqueeze(0).to(device)  # Add batch dimension and move to device
-            reconstructed_signal, _ = model(input_signal)
-
-            # Move tensors to CPU and convert to numpy
-            input_signal_np = input_signal.detach().cpu().numpy()
-            reconstructed_signal_np = reconstructed_signal.detach().cpu().numpy()
-            # Undo normalization
-            reconstructed_signal_np = (reconstructed_signal_np * output_scaler_divval) + output_scaler_subval
-
-            # Plot and save the input and reconstructed signals
-            fig, ax = plt.subplots()
-            ax.plot(input_signal_np.squeeze(), label="Input", color="blue")
-            ax.plot(reconstructed_signal_np.squeeze(), label="Reconstructed", color="orange")
-            ax.legend()
-            ax.set_title(f"Sample {i}")
-            ax.set_xlabel("Index")
-            ax.set_ylabel("Value")
-            fig.tight_layout()
-            # Save each plot separately for clarity
-            fig.savefig(os.path.join(recon_dir, f'reconstruction_{i}.png'))
-            plt.close(fig)
-    return
+# --------------- Define functions ---------------- #
 
 def plot_loss_curve(stats_file):
+    """Plot the training and validation loss curves."""
+
     df = pd.read_csv(stats_file)
     fig, ax = plt.subplots(1,1)
     ax.plot(df['epoch'], df['train_loss'], label='train')
@@ -120,11 +51,40 @@ def plot_loss_curve(stats_file):
     ax.set_xlabel('Epoch'); ax.set_ylabel('Loss')
     ax.legend(); plt.tight_layout()
     fig.savefig(os.path.join(f"{outputs_dir}/evaluation", 'loss_curve.png'))
+    return
 
-def evaluate_reconstructions(model, loader, device, loss_fn):
+def export_onnx(model, input_shape):
+    """Export the model to ONNX format."""
+
+    # Ensure input_shape is a tuple of ints (not numpy floats)
+    if isinstance(input_shape, np.ndarray):
+        input_shape = tuple(int(x) for x in input_shape)
+    else:
+        input_shape = tuple(int(x) for x in input_shape)
+
+    # Place dummy_input on the same device as the model
+    device = next(model.parameters()).device
+    dummy_input = torch.randn(1, *input_shape, device=device)
+    onnx_path = os.path.join(models_dir, f'best_autoencoder_model.onnx')
+
+    torch.onnx.export(
+        model,
+        dummy_input,
+        onnx_path,
+        input_names=['input'],
+        output_names=['output'],
+        opset_version=11
+    )
+    print(f'Exported ONNX model to: {onnx_path}')
+    return
+
+def evaluate_reconstructions(model, input_shape, loader, device, loss_fn):
+    """Evaluate the model's reconstructions and plot the latent space."""
+    
     model.eval()
-    all_errors = []
-    embeddings = []
+    export_onnx(model, input_shape)  # Export the model to ONNX format
+
+    all_errors, embeddings, outputs = [], [], []
 
     with torch.no_grad():
         for x, _ in tqdm(loader, desc="Evaluating", leave=False):
@@ -135,26 +95,42 @@ def evaluate_reconstructions(model, loader, device, loss_fn):
 
             # Flatten latent except batch dimension
             embeddings.append(latent.detach().cpu().numpy().reshape(latent.shape[0], -1))
+            outputs.append(recon.detach().cpu().numpy())
+
     errors = np.concatenate(all_errors)
     embeds = np.concatenate(embeddings, axis=0)
+    outputs = np.concatenate(outputs, axis=0)
 
     # Histogram of errors
     fig, axes = plt.subplots(1,2)
     axes[0].hist(errors, bins=50, alpha=0.7)
     axes[0].set_xlabel('Reconstruction RMSE'); axes[0].set_ylabel('Count')
 
-    # Run t-SNE (openTSNE is much faster)
+    # Run t-SNE (openTSNE library)
     tsne = TSNE(n_jobs=4, random_state=0)  # n_jobs sets the number of CPU cores
     z2d = tsne.fit(embeds)
     axes[1].scatter(z2d[:,0], z2d[:,1], s=5, alpha=0.6)
     axes[1].set_title('Latent space t-SNE'); plt.tight_layout()
 
     fig.savefig(os.path.join(f"{outputs_dir}/evaluation", 'latent_tsne.png'))
-    return errors, embeds
 
-def main():
+    # Unormalize the outputs
+    outsubval = np.load(f"{norms_dir}/{RUN_ID}_output_autoen_scaler_subval.npy")
+    outdivval = np.load(f"{norms_dir}/{RUN_ID}_output_autoen_scaler_divval.npy")
+    outputs_denorm = (outputs * outdivval) + outsubval
+
+    # Save the errors, embeddings, and reconstructed outputs (unnormalized)
+    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_tsne.npy'), z2d)
+    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_reconstructed_outputs.npy'), outputs_denorm)
+    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_recon_errors.npy'), errors)
+    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_latent_embeddings.npy'), embeds)
+    return
+
+def load_model(architecture_file, device):
+    """Load the model architecture and state dictionary."""
+
     # -- Load the architecture of the model -- #
-    with open(f"{models_dir}/autoencoder_architecture.txt") as f:
+    with open(architecture_file) as f:
         lines = f.read()
 
     # -- Extract model parameters from the architecture -- #
@@ -167,10 +143,8 @@ def main():
     input_shape = (int(re.search(r'Conv1d\((\d+),', lines).group(1)),
                 int(re.search(r'Upsample\(size=(\d+),', lines).group(1)))
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # -- Create the model -- #
-    model = NeuralNetwork({
+    # -- Create the model architecture -- #
+    params = {
         "type": "autoencoder",
         "input_shape": input_shape,
         "embed_dim": embed_dim,
@@ -180,10 +154,13 @@ def main():
         "kernel_size": kernel_size,
         "use_pooling": use_pooling,
         "device": device,
-    })
+    }
+
+    # -- Create the model -- #
+    model = NeuralNetwork(params)
 
     # -- Load the saved state dictionary -- #
-    model_path = f"{models_dir}/best_autoencoder_model_20250512_132414.pt"  # Replace with your model path
+    model_path = f"{models_dir}/{RUN_ID}_best_autoencoder_model.pt"
     checkpoint = torch.load(model_path, map_location=device)
     state_dict = checkpoint["model_state_dict"]
 
@@ -200,49 +177,72 @@ def main():
         new_state_dict[new_key] = v
     model.load_state_dict(new_state_dict)
     model.to(device)
-    
-    # -- Load the input data for evaluation -- #
-    path = f"{data_dir}/RDFs/rdf_images.pt"
-    target_path = None
-    inputs = torch.load(path).float()
-    targets = torch.load(target_path).float() if target_path else inputs.clone()
-    #print(f"Input shape: {inputs.shape}")
 
-    # -- Plot the model's reconstructions and training curves -- #
-    plot_reconstructions(model, inputs, device, selection=[1,100,10000,70000])
-    plot_loss_curve(f"{stats_dir}/train_autoencoder_stats.txt")
+    return model, params
 
-    # -- Load the input data for evaluation -- #
-    path = f"{data_dir}/RDFs/rdf_images.pt"
-    target_path = None
-    inputs = torch.load(path).float()
-    targets = torch.load(target_path).float() if target_path else inputs.clone()
-    print(f"Input shape: {inputs.shape}")
-
-    # -- Dataset and DataLoader for evaluation -- #
+def rebuild_dataset(inputs, targets, batch_size):
+    """Create a DataLoader for the dataset."""
     from sklearn.model_selection import train_test_split
-    X_train, X_val, _, _ = train_test_split(inputs, targets,
+    X_train, X_val, y_train, y_val = train_test_split(
+        inputs, targets,
         train_size=0.8,
         random_state=42
     )
-    val_dataset = PreloadedDataset(X_val,
-                                   X_val,
-                                   norm_inputs=True,
-                                   norm_targets=True)
-    val_loader = DataLoader(val_dataset,
-                            batch_size=256,
-                            num_workers=4,
-                            pin_memory=True)
+
+    # Save the validation inputs for correct comparison with reconstructions (if pure autoencoder, X_val==y_val)
+    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_val_inputs.npy"), X_val.cpu().numpy())
+    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_val_targets.npy"), y_val.cpu().numpy())
     
-    print(f"Validation set size: {len(val_loader.dataset)}")
+    val_dataset = PreloadedDataset(
+        X_val,
+        y_val,
+        norm_inputs=True,
+        norm_targets=True
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        num_workers=4,
+        pin_memory=True
+    )
+    return val_loader, X_val, y_val
 
-    # -- Embed the data into the latent space -- #
+def get_device():
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def main():
+    """Main function to evaluate the autoencoder model."""
+
+    # Load the model
+    device = get_device()
+    architecture_file = f"{models_dir}/autoencoder_architecture.txt"
+    model, _ = load_model(architecture_file, device)
+
+    # Load the input data for evaluation
+    path = f"{data_dir}/RDFs/rdf_images.pt"
+    target_path = None
+    inputs = torch.load(path).float()
+    targets = torch.load(target_path).float() if target_path else inputs.clone()
+ 
+    # Save the unnormalized inputs and targets for later comparison
+    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_all_inputs.npy"), inputs.cpu().numpy())
+    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_all_targets.npy"), targets.cpu().numpy())
+
+    # Ensure input_shape is a tuple of ints (not floats or numpy types)
+    batch_size = int(inputs.shape[0])
+    input_shape = tuple(int(x) for x in inputs.shape[1:])
+
+    # Dataset and DataLoader for evaluation
+    val_loader, X_val, y_val = rebuild_dataset(inputs, targets, batch_size=batch_size)
+
+    # Loss function
     loss_fn = MSELoss()
-    errors, embeds = evaluate_reconstructions(model, val_loader, device, loss_fn)
 
-    # -- Save the errors and embeddings -- #
-    np.save(os.path.join(f"{outputs_dir}/evaluation", 'recon_errors.npy'), errors)
-    np.save(os.path.join(f"{outputs_dir}/evaluation", 'latent_embeddings.npy'), embeds)
+    # run the evaluation
+    evaluate_reconstructions(model, input_shape, val_loader, device, loss_fn)
+    plot_loss_curve(f"{stats_dir}/{RUN_ID}_train_stats.txt")
+
+# -------------- Execute the main function --------------- #
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from PyISV.neural_network import NeuralNetwork
-from PyISV.train_utils import Dataset, CrossEntropyLoss
+from PyISV_project.PyISV.training_utils import Dataset, CrossEntropyLoss
 import yaml
 import logging
 import os

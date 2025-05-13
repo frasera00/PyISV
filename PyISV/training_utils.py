@@ -1,6 +1,8 @@
-import torch
+# General training utilities for PyISV
+
 from torch import nn
 from torch.utils.data import Dataset
+import torch
 
 # -- Model type check -- #
 class InvalidModelTypeError(ValueError):

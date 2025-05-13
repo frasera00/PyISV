@@ -4,6 +4,25 @@ from torch import nn
 from torch.utils.data import Dataset
 import torch
 
+def log_gpu_memory_usage(device=None, prefix=""):
+    """Logs current, reserved, and max allocated GPU memory for the given device (default: current device)."""
+    import torch
+    import logging
+    if not torch.cuda.is_available():
+        return
+    if device is None:
+        device = torch.cuda.current_device()
+    else:
+        device = device.index if hasattr(device, 'index') else device
+    allocated = torch.cuda.memory_allocated(device) / (1024 ** 2)
+    reserved = torch.cuda.memory_reserved(device) / (1024 ** 2)
+    max_allocated = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+    msg = (
+        f"{prefix}GPU Memory (device {device}): "
+        f"allocated={allocated:.2f}MB, reserved={reserved:.2f}MB, max_allocated={max_allocated:.2f}MB"
+    )
+    logging.info(msg)
+
 # -- Model type check -- #
 class InvalidModelTypeError(ValueError):
     def __init__(self):

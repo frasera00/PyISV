@@ -6,8 +6,6 @@ import os
 from tqdm import tqdm
 import time
 from ase.io import read
-from joblib import Parallel, delayed
-
 #-----------------------------------------
 # ASE-TORCH KDE RDF FUNCTIONS 
 #-----------------------------------------
@@ -33,6 +31,19 @@ def normalized_histogram(x: torch.Tensor, bins: torch.Tensor, factor: torch.Tens
         x = x.unsqueeze(0)  # Ensure x has at least 2 dimensions
     pdf, _ = marginal_pdf(x.unsqueeze(2), bins, bandwidth, epsilon)
     return pdf * factor
+
+@torch.jit.script
+def torch_kde_calc(values: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
+    return normalized_histogram(values.unsqueeze(0), bins, computefactor(bins), bandwidth)
+
+import torch
+
+@torch.jit.script
+def compute_pairwise_distances(positions: torch.Tensor) -> torch.Tensor:
+    # positions: [N, 3] or [N, D]
+    full = torch.cdist(positions, positions)  # [N, N]
+    idx = torch.triu_indices(full.size(0), full.size(0), offset=1)
+    return full[idx[0], idx[1]]  # [N*(N−1)/2]
 
 def compute_ase_all_distances(Atoms, mic=False):
     distances = np.array(Atoms.get_all_distances(mic))  # Ensure distances is a NumPy array
@@ -65,9 +76,6 @@ def compute_ase_idx_distances(conf, indices1, indices2=None, mic=False):
         return np.array([])
     return np.hstack(dist_list)
 
-def torch_kde_calc(values: torch.Tensor, bins: torch.Tensor, bandwidth: torch.Tensor) -> torch.Tensor:
-    return normalized_histogram(values.unsqueeze(0), bins, computefactor(bins), bandwidth)
-
 def triple_kde_calc(specie1, specie2, conf, bins, bw, mic=False):
     there_is_s1 = False
     there_is_s2 = False
@@ -99,13 +107,20 @@ def triple_kde_calc(specie1, specie2, conf, bins, bw, mic=False):
     
     return s1_s1_rdf, s2_s2_rdf, s1_s2_rdf
 
-def single_kde_calc(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor, mic=False) -> torch.Tensor:
+
+@torch.jit.script
+def single_kde_calc_ase(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor, mic=False) -> torch.Tensor:
     distances = compute_ase_all_distances(Atoms, mic=mic)
     if isinstance(distances, torch.Tensor) and distances.numel() == 0:
         return torch.zeros_like(bins)
     return torch_kde_calc(torch.Tensor(distances), bins, bandwidth)  # Return as a PyTorch tensor
 
-def build_rdf(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path,
+def single_kde_calc_torch(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor, device: torch.device, mic=False) -> torch.Tensor:
+    pos = torch.from_numpy(Atoms.get_positions()).float().to(device, mic=mic)  # [N,3]
+    distances = compute_pairwise_distances(pos)
+    return torch_kde_calc(torch.Tensor(distances), bins, bandwidth)
+
+def build_rdf(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path, device,
               mic=False, fraction=1.0, mode="single", specie1=None, specie2=None):
     """
     Builds RDFs (single or triple) and saves them as images.
@@ -125,7 +140,7 @@ def build_rdf(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path,
     """
 
     # Log the input parameters
-    logging.info("Starting RDF computation with the following parameters:")
+    logging.info("Parameters:")
     logging.info(f"xyz_path: {xyz_path}")
     logging.info(f"min_dist: {min_dist}, max_dist: {max_dist}, n_bins: {n_bins}, bandwidth: {bandwidth}")
     logging.info(f"fraction: {fraction}, mode: {mode}")
@@ -147,7 +162,7 @@ def build_rdf(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path,
 
     # Predefine the RDF computation logic based on the mode
     if mode == "single":
-        rdf_computation = lambda atoms: single_kde_calc(atoms, bins, bw, mic=mic)
+        rdf_computation = lambda atoms: single_kde_calc_torch(atoms, bins, bw, device=device, mic=mic)
     elif mode == "triple":
         if specie1 is None or specie2 is None:
             raise ValueError("specie1 and specie2 must be provided for triple KDE.")
@@ -203,7 +218,9 @@ def build_rdf_alt(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path, 
     """
 
     # Load frames
+    print("reading xyz file")
     configurations = read(xyz_path, index=":")
+    print("read file")
 
     # Prepare bins and bandwidth
     bins = torch.linspace(min_dist, max_dist, n_bins)

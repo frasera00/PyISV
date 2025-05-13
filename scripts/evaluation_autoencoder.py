@@ -19,7 +19,7 @@ from collections import OrderedDict
 from tqdm import tqdm 
 
 # Import custom modules
-from PyISV.training_utils import PreloadedDataset, MSELoss
+from PyISV.training_utilities import PreloadedDataset, MSELoss
 from PyISV.neural_network import NeuralNetwork 
 
 # ------------ Set paths to directories ------------- #

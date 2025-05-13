@@ -14,29 +14,29 @@ general:
 model:
   type: "autoencoder"     # Options: "autoencoder", "classifier"
   input_shape: [1, 340]   # number of channels, number of bins
-  encoder_channels: [8, 16, 32, 64, 64, 128, 128]
-  decoder_channels: [128, 128, 64, 64, 32, 16, 8]
+  encoder_channels: [8, 16, 32, 32, 64, 64, 128, 128]
+  decoder_channels: [128, 128, 64, 64, 32, 32, 16, 8]
   activation_fn: "ReLU"
   embed_dim: 2            # Bottleneck size
-  kernel_size: 5          # Kernel size used in convolutional layers
+  kernel_size: 3          # Kernel size used in convolutional layers
   use_pooling: True       # Use pooling layers in the model
 
 # Training settings
 training:
-  batch_size: 256         # Batch size for training
+  batch_size: 250         # Batch size for training
   train_fraction: 0.8     # Fraction of data used for training
   min_epochs: 300         # Minimum number of epochs
   max_epochs: 500         # Maximum number of epochs
   early_stopping:         # Early stopping settings
     patience: 10          # Number of epochs with no improvement after which training will be stopped
-    delta: 0.00005        # Minimum change in the monitored quantity to qualify as an improvement
+    delta: 0.00003        # Minimum change in the monitored quantity to qualify as an improvement
   num_workers: 4          # Number of workers for data loading
   pin_memory: True        # Load data into memory for faster access
   use_ddp: True           # Use Distributed Data Parallel
   gradient_clipping: 1.0  # Gradient clipping value
   learning_rate: 0.001    # Initial learning rate
   scheduled_lr: True      # Use learning rate scheduler
-  lr_warmup_epochs: 10    # Number of epochs for learning rate warmup
+  lr_warmup_epochs: 20    # Number of epochs for learning rate warmup
   use_lr_finder: False    # Use learning rate finder
   use_tensorboard: False  # Use TensorBoard for logging
 
@@ -49,9 +49,9 @@ input:
 # Output settings
 output:
   model_name: "best_autoencoder_model.pt"
-  log_file: "train_autoencoder_log.txt"
-  stats_file: "train_autoencoder_stats.txt"
-  model_architecture_file: "autoencoder_architecture.txt"
+  log_file: "train_autoencoder.log"
+  stats_file: "train_autoencoder_stats.dat"
+  model_architecture_file: "autoencoder_architecture.dat"
   normalization_params:
     divval_inputs: "input_autoen_scaler_subval.npy"
     subval_inputs: "input_autoen_scaler_divval.npy"

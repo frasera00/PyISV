@@ -7,7 +7,7 @@ import torch.jit
 
 # Import custom modules
 from PyISV.model_building import build_encoder, build_decoder, build_bottleneck, build_classification_head
-from PyISV.training_utils import InvalidModelTypeError
+from PyISV.training_utilities import InvalidModelTypeError
 
 # Import training and validation helpers
 from PyISV.training_helpers import *
@@ -43,10 +43,16 @@ class NeuralNetwork(nn.Module):
         # Calculate num_encoder_final_channels internally based on encoder_channels
         self.num_encoder_final_channels = encoder_channels[-1]
 
-        # Infer spatial dimension dynamically from input shape
+        # Infer spatial dimension dynamically from input shape using eval mode to avoid BatchNorm errors
         input_shape = config.get("input_shape")
         dummy_input = torch.zeros(1, input_shape[0], input_shape[1])
-        dummy_output = build_encoder(input_shape[0], encoder_channels, self.activation_fn, kernel_size=self.kernel_size)(dummy_input)
+        # Build a temporary encoder for shape inference
+        encoder_tmp = build_encoder(
+            input_shape[0], encoder_channels, self.activation_fn, kernel_size=self.kernel_size
+        )
+        encoder_tmp.eval()
+        with torch.no_grad():
+            dummy_output = encoder_tmp(dummy_input)
         self.flat_dim = dummy_output.size(1) * dummy_output.size(2)
 
         if self.model_type == "autoencoder":
@@ -85,11 +91,7 @@ class NeuralNetwork(nn.Module):
   
     # --- Forward pass ---
     def forward(self, x):
-        # Assert input shape for debugging (avoid in tracing)
-        if not torch.jit.is_tracing():
-            expected_shape = (x.size(0), self.encoder[0].in_channels, x.size(2))
-            assert_shape(x, expected_shape, name="Input")
-        
+        # Forward pass through the model    
         if self.model_type == "autoencoder":
             z = self.encoder(x)
             z_flat = z.view(z.size(0), -1)  # Flatten the tensor
@@ -100,8 +102,6 @@ class NeuralNetwork(nn.Module):
             z_out = z_bottleneck.view(z.size(0), self.num_encoder_final_channels, new_flat_dim)  # Correctly reshape for decoder
 
             reconstructed = self.decoder(z_out)
-            if not torch.jit.is_tracing():
-                assert_shape(reconstructed, x.shape, name="Reconstructed")
             return reconstructed, z_out
         
         elif self.model_type == "classifier":

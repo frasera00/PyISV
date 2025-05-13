@@ -4,7 +4,7 @@
 
 # Import model class and training utilities
 from PyISV.neural_network import NeuralNetwork
-from PyISV.training_utils import (
+from PyISV.training_utilities import (
     Dataset, MSELoss, SaveBestModel, 
     EarlyStopping, PreloadedDataset, log_gpu_memory_usage
 )
@@ -218,9 +218,9 @@ model = NeuralNetwork({
 })
 model.to(device)
 
-# DDP or DataParallel setup
+# DDP setup: enable find_unused_parameters to avoid hangs when some submodules are unused
 if use_ddp and dist.is_initialized():
-    model = DDP(model, device_ids=[local_rank])
+    model = DDP(model, device_ids=[local_rank], find_unused_parameters=True)
 elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
     logging.info(f"Using DataParallel on {torch.cuda.device_count()} GPUs")
     model = DataParallel(model)
@@ -239,7 +239,7 @@ with open(stats_file, "w") as f:
 
 # Save model architecture to file
 model_architecture_file = OUTPUT_CONFIG["model_architecture_file"]
-with open(os.path.join(models_dir, model_architecture_file), "w") as f:
+with open(os.path.join(models_dir, f"{RUN_ID}_model_architecture_file"), "w") as f:
     f.write(str(model))  # Save the model architecture
 
 # ----------------- Training function -------------- #
@@ -338,8 +338,8 @@ def train_autoencoder(model, train_loader, valid_loader, training_params, utilit
                 log_main(logging.INFO, f"Epoch {epoch + 1} stats saved to {stats_file}")
 
         # Log GPU memory usage (main process only, if CUDA)
-        if is_main_process() and torch.cuda.is_available():
-            log_gpu_memory_usage(device, prefix=f"END EPOCH {epoch}: ")
+        #if is_main_process() and torch.cuda.is_available():
+        #    log_gpu_memory_usage(device, prefix=f"END EPOCH {epoch}: ")
 
         # Save best model only if validation loss improves
         if (not hasattr(train_autoencoder, "best_val_loss")) or (val_loss < train_autoencoder.best_val_loss):

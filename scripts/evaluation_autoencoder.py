@@ -12,7 +12,6 @@ import os
 import re
 
 # Import functions from external libraries
-from openTSNE import TSNE
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from collections import OrderedDict
@@ -26,7 +25,7 @@ from PyISV.neural_network import NeuralNetwork
 
 # Set the run ID for the current evaluation.
 # Should match the run ID used during training
-RUN_ID = "20250512_195715"
+RUN_ID = "0"
 
 # Get the absolute path to the PyISV root
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,32 +40,27 @@ stats_dir = os.path.join(PYISV_ROOT, 'stats')
 
 # --------------- Define functions ---------------- #
 
-def plot_loss_curve(stats_file):
-    """Plot the training and validation loss curves."""
-
+def plot_loss_curve(stats_file, output_path=None):
+    """Plot the training and validation loss curves and optionally save to output_path."""
     df = pd.read_csv(stats_file)
     fig, ax = plt.subplots(1,1)
     ax.plot(df['epoch'], df['train_loss'], label='train')
     ax.plot(df['epoch'], df['val_loss'],   label='val')
     ax.set_xlabel('Epoch'); ax.set_ylabel('Loss')
     ax.legend(); plt.tight_layout()
-    fig.savefig(os.path.join(f"{outputs_dir}/evaluation", 'loss_curve.png'))
-    return
+    if output_path:
+        fig.savefig(output_path)
+    return fig
 
-def export_onnx(model, input_shape):
-    """Export the model to ONNX format."""
-
-    # Ensure input_shape is a tuple of ints (not numpy floats)
+def export_onnx(model, input_shape, onnx_path):
+    """Export the model to ONNX format at the given path."""
+    import torch.onnx
     if isinstance(input_shape, np.ndarray):
         input_shape = tuple(int(x) for x in input_shape)
     else:
         input_shape = tuple(int(x) for x in input_shape)
-
-    # Place dummy_input on the same device as the model
     device = next(model.parameters()).device
     dummy_input = torch.randn(1, *input_shape, device=device)
-    onnx_path = os.path.join(models_dir, f'best_autoencoder_model.onnx')
-
     torch.onnx.export(
         model,
         dummy_input,
@@ -78,55 +72,49 @@ def export_onnx(model, input_shape):
     print(f'Exported ONNX model to: {onnx_path}')
     return
 
-def evaluate_reconstructions(model, input_shape, loader, device, loss_fn):
-    """Evaluate the model's reconstructions and plot the latent space."""
+def evaluate_reconstructions(model, input_shape, loader, device, loss_fn, norm_files, output_files):
+    """Evaluate the model's reconstructions, plot latent space, and save results to output_dir."""
+    from openTSNE import TSNE
+
+    export_onnx(model, input_shape)  # Export the model to ONNX format
     
     model.eval()
-    export_onnx(model, input_shape)  # Export the model to ONNX format
-
     all_errors, embeddings, outputs = [], [], []
-
     with torch.no_grad():
         for x, _ in tqdm(loader, desc="Evaluating", leave=False):
             x = x.to(device)
             recon, latent = model(x)
             errs = loss_fn(recon, x).detach().cpu().numpy()
             all_errors.append(np.atleast_1d(errs))
-
-            # Flatten latent except batch dimension
             embeddings.append(latent.detach().cpu().numpy().reshape(latent.shape[0], -1))
             outputs.append(recon.detach().cpu().numpy())
-
     errors = np.concatenate(all_errors)
     embeds = np.concatenate(embeddings, axis=0)
     outputs = np.concatenate(outputs, axis=0)
 
-    # Histogram of errors
+    # Histogram of errors and t-SNE
     fig, axes = plt.subplots(1,2)
     axes[0].hist(errors, bins=50, alpha=0.7)
     axes[0].set_xlabel('Reconstruction RMSE'); axes[0].set_ylabel('Count')
-
-    # Run t-SNE (openTSNE library)
-    tsne = TSNE(n_jobs=4, random_state=0)  # n_jobs sets the number of CPU cores
+    tsne = TSNE(n_jobs=4, random_state=0)
     z2d = tsne.fit(embeds)
     axes[1].scatter(z2d[:,0], z2d[:,1], s=5, alpha=0.6)
     axes[1].set_title('Latent space t-SNE'); plt.tight_layout()
+    fig.savefig(output_files['tsne'].replace('.npy', '.png'))
 
-    fig.savefig(os.path.join(f"{outputs_dir}/evaluation", 'latent_tsne.png'))
-
-    # Unormalize the outputs
-    outsubval = np.load(f"{norms_dir}/{RUN_ID}_output_autoen_scaler_subval.npy")
-    outdivval = np.load(f"{norms_dir}/{RUN_ID}_output_autoen_scaler_divval.npy")
+    # Unnormalize outputs
+    outsubval = np.load(norm_files['subval'])
+    outdivval = np.load(norm_files['divval'])
     outputs_denorm = (outputs * outdivval) + outsubval
 
-    # Save the errors, embeddings, and reconstructed outputs (unnormalized)
-    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_tsne.npy'), z2d)
-    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_reconstructed_outputs.npy'), outputs_denorm)
-    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_recon_errors.npy'), errors)
-    np.save(os.path.join(f"{outputs_dir}/evaluation", f'{RUN_ID}_latent_embeddings.npy'), embeds)
-    return
+    # Save results
+    np.save(output_files['tsne'], z2d)
+    np.save(output_files['reconstructed_outputs'], outputs_denorm)
+    np.save(output_files['reconstructed_errors'], errors)
+    np.save(output_files['embeddings'], embeds)
+    return fig, errors, embeds, outputs, z2d
 
-def load_model(architecture_file, device):
+def build_model_from_architecture(architecture_file, model_file, device):
     """Load the model architecture and state dictionary."""
 
     # -- Load the architecture of the model -- #
@@ -160,8 +148,7 @@ def load_model(architecture_file, device):
     model = NeuralNetwork(params)
 
     # -- Load the saved state dictionary -- #
-    model_path = f"{models_dir}/{RUN_ID}_best_autoencoder_model.pt"
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_file, map_location=device)
     state_dict = checkpoint["model_state_dict"]
 
     # -- Load the state dictionary into the model -- #
@@ -180,7 +167,7 @@ def load_model(architecture_file, device):
 
     return model, params
 
-def rebuild_dataset(inputs, targets, batch_size):
+def rebuild_dataset(inputs, targets, batch_size, output_files):
     """Create a DataLoader for the dataset."""
     from sklearn.model_selection import train_test_split
     X_train, X_val, y_train, y_val = train_test_split(
@@ -190,9 +177,9 @@ def rebuild_dataset(inputs, targets, batch_size):
     )
 
     # Save the validation inputs for correct comparison with reconstructions (if pure autoencoder, X_val==y_val)
-    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_val_inputs.npy"), X_val.cpu().numpy())
-    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_val_targets.npy"), y_val.cpu().numpy())
-    
+    np.save(output_files['val_inputs'], X_val.cpu().numpy())
+    np.save(output_files['val_targets'], y_val.cpu().numpy())
+
     val_dataset = PreloadedDataset(
         X_val,
         y_val,
@@ -213,10 +200,25 @@ def get_device():
 def main():
     """Main function to evaluate the autoencoder model."""
 
+    # Set output files
+    output_files = {
+        'val_inputs': f"{output_files}/evaluation/{RUN_ID}_val_inputs.npy",
+        'val_targets': f"{output_files}/evaluation/{RUN_ID}_val_targets.npy",
+        'reconstructed_outputs': f"{output_files}/evaluation/{RUN_ID}_reconstructed_outputs.npy",
+        'reconstructed_errors': f"{output_files}/evaluation/{RUN_ID}_reconstructed_errors.npy",
+        'embeddings': f"{output_files}/evaluation/{RUN_ID}_embeddings.npy",
+        'tsne': f"{output_files}/evaluation/{RUN_ID}_latent_tsne.npy",
+    }
+
+    norm_files = {
+        'subval': f"{norms_dir}/{RUN_ID}_output_autoencoder_scaler_subval.npy",
+        'divval': f"{norms_dir}/{RUN_ID}_output_autoencoder_scaler_divval.npy",
+    }
+
     # Load the model
     device = get_device()
-    architecture_file = f"{models_dir}/autoencoder_architecture.txt"
-    model, _ = load_model(architecture_file, device)
+    architecture_file = f"{models_dir}/{RUN_ID}_autoencoder_architecture.txt"
+    model, _ = build_model_from_architecture(architecture_file, device)
 
     # Load the input data for evaluation
     path = f"{data_dir}/RDFs/rdf_images.pt"
@@ -225,21 +227,21 @@ def main():
     targets = torch.load(target_path).float() if target_path else inputs.clone()
  
     # Save the unnormalized inputs and targets for later comparison
-    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_all_inputs.npy"), inputs.cpu().numpy())
-    np.save(os.path.join(outputs_dir, "evaluation", f"{RUN_ID}_all_targets.npy"), targets.cpu().numpy())
+    np.save(f"{outputs_dir}/evaluation/{RUN_ID}_all_inputs.npy", inputs.cpu().numpy())
+    np.save(f"{outputs_dir}/evaluation/{RUN_ID}_all_targets.npy", targets.cpu().numpy())
 
     # Ensure input_shape is a tuple of ints (not floats or numpy types)
     batch_size = int(inputs.shape[0])
     input_shape = tuple(int(x) for x in inputs.shape[1:])
 
     # Dataset and DataLoader for evaluation
-    val_loader, X_val, y_val = rebuild_dataset(inputs, targets, batch_size=batch_size)
+    val_loader, X_val, y_val = rebuild_dataset(inputs, targets, batch_size, output_files)
 
     # Loss function
     loss_fn = MSELoss()
 
     # run the evaluation
-    evaluate_reconstructions(model, input_shape, val_loader, device, loss_fn)
+    evaluate_reconstructions(model, input_shape, val_loader, device, loss_fn, norm_files, output_files)
     plot_loss_curve(f"{stats_dir}/{RUN_ID}_train_stats.txt")
 
 # -------------- Execute the main function --------------- #

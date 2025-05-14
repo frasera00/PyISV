@@ -23,9 +23,15 @@ from PyISV.neural_network import NeuralNetwork
 
 # ------------ Set paths to directories ------------- #
 
-# Set the run ID for the current evaluation.
-# Should match the run ID used during training
-RUN_ID = "0"
+# Parse run ID from command line
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    '--RUN_ID',
+    type=str
+)
+args = parser.parse_args()
+RUN_ID = args.RUN_ID
 
 # Get the absolute path to the PyISV root
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -114,7 +120,7 @@ def evaluate_reconstructions(model, input_shape, loader, device, loss_fn, norm_f
     np.save(output_files['embeddings'], embeds)
     return fig, errors, embeds, outputs, z2d
 
-def build_model_from_architecture(architecture_file, model_file, device):
+def build_model_from_architecture(architecture_file, model_file, input_files, device):
     """Load the model architecture and state dictionary."""
 
     # -- Load the architecture of the model -- #
@@ -165,7 +171,12 @@ def build_model_from_architecture(architecture_file, model_file, device):
     model.load_state_dict(new_state_dict)
     model.to(device)
 
-    return model, params
+    # Load the input data for evaluation
+    inputs = torch.load(input_files['val_inputs']).float()
+    targets = torch.load(input_files['val_targets']).float() if input_files['val_targets'] else inputs.clone()
+
+
+    return model, inputs, targets, params
 
 def rebuild_dataset(inputs, targets, batch_size, output_files):
     """Create a DataLoader for the dataset."""
@@ -202,12 +213,12 @@ def main():
 
     # Set output files
     output_files = {
-        'val_inputs': f"{output_files}/evaluation/{RUN_ID}_val_inputs.npy",
-        'val_targets': f"{output_files}/evaluation/{RUN_ID}_val_targets.npy",
-        'reconstructed_outputs': f"{output_files}/evaluation/{RUN_ID}_reconstructed_outputs.npy",
-        'reconstructed_errors': f"{output_files}/evaluation/{RUN_ID}_reconstructed_errors.npy",
-        'embeddings': f"{output_files}/evaluation/{RUN_ID}_embeddings.npy",
-        'tsne': f"{output_files}/evaluation/{RUN_ID}_latent_tsne.npy",
+        'val_inputs': f"{outputs_dir}/evaluation/{RUN_ID}_val_inputs.npy",
+        'val_targets': f"{outputs_dir}/evaluation/{RUN_ID}_val_targets.npy",
+        'reconstructed_outputs': f"{outputs_dir}/evaluation/{RUN_ID}_reconstructed_outputs.npy",
+        'reconstructed_errors': f"{outputs_dir}/evaluation/{RUN_ID}_reconstructed_errors.npy",
+        'embeddings': f"{outputs_dir}/evaluation/{RUN_ID}_embeddings.npy",
+        'tsne': f"{outputs_dir}/evaluation/{RUN_ID}_latent_tsne.npy",
     }
 
     norm_files = {
@@ -218,14 +229,13 @@ def main():
     # Load the model
     device = get_device()
     architecture_file = f"{models_dir}/{RUN_ID}_autoencoder_architecture.txt"
-    model, _ = build_model_from_architecture(architecture_file, device)
+    model_file = f"{models_dir}/{RUN_ID}_best_autoencoder_model.pt"
+    input_files = {
+        "val_inputs": f"{data_dir}/RDFs/rdf_images.pt",
+        "val_targets": None,
+    }
+    model, inputs, targets, params = build_model_from_architecture(architecture_file, input_files, model_file, device)
 
-    # Load the input data for evaluation
-    path = f"{data_dir}/RDFs/rdf_images.pt"
-    target_path = None
-    inputs = torch.load(path).float()
-    targets = torch.load(target_path).float() if target_path else inputs.clone()
- 
     # Save the unnormalized inputs and targets for later comparison
     np.save(f"{outputs_dir}/evaluation/{RUN_ID}_all_inputs.npy", inputs.cpu().numpy())
     np.save(f"{outputs_dir}/evaluation/{RUN_ID}_all_targets.npy", targets.cpu().numpy())

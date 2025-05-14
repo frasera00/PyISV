@@ -229,7 +229,7 @@ elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
 loss_function = MSELoss()
 
 # Callbacks and utilities
-save_best_model = SaveBestModel(best_model_name=f"{models_dir}/{RUN_ID}_best_model.pt",)
+save_best_model = SaveBestModel(best_model_name=f"{models_dir}/{RUN_ID}_best_autoencoder_model.pt",)
 early_stopping = EarlyStopping(patience=early_stopping_config["patience"], min_delta=early_stopping_config["delta"])
 
 # Statistics file

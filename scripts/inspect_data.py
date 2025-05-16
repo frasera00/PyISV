@@ -1,15 +1,16 @@
 import torch
+import numpy as np
 
-def inspect_data():
-    labels_path = "data/Ag38_labels/labels.pt"
-    rdf_images_path = "data/RDFs/rdf_images.pt"
+def inspect_data() -> None:
+    rdf_files = "data/RDFs/RDFs.npy"
 
     try:
-        labels = torch.load(labels_path)
-        rdf_images = torch.load(rdf_images_path)
-
-        print(f"Labels shape: {labels.shape}")
-        print(f"RDF Images shape: {rdf_images.shape}")
+        if rdf_files.endswith('.npy'):
+            rdf_images = np.load(rdf_files)
+            print(f"RDF Images shape: {rdf_images.shape}")
+        else:
+            rdf_images = torch.load(rdf_files)
+            print(f"RDF Images shape: {rdf_images.shape}")
     except Exception as e:
         print(f"Error loading data: {e}")
 

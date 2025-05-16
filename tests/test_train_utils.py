@@ -2,7 +2,7 @@
 import os
 import torch
 import unittest
-from PyISV_project.PyISV.training_utils import Dataset
+from PyISV_project.PyISV.training_utilities import Dataset
 
 class TestDataset(unittest.TestCase):
     def setUp(self):

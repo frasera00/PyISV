@@ -1,59 +1,23 @@
-import torch
+# Model building algorithms for PyISV
+
 import torch.nn as nn
 
-# -- Model building functions -- #
-def build_classification_head(embed_dim, num_classes, activation_fn, flat_dim, hidden_dim=128, dropout=None):
-    """Builds a classification head."""
-
-    return nn.Sequential(
-            nn.Linear(flat_dim, hidden_dim),
-            activation_fn(),
-            nn.Dropout(dropout) if dropout else nn.Identity(),
-            nn.Linear(hidden_dim, embed_dim),
-            activation_fn(),
-            nn.Linear(embed_dim, num_classes)
-            )
-
-def build_encoder(input_channels, encoder_channels, activation_fn, kernel_size=5):
-    """Builds the encoder for 1D data with `same` padding."""
+def build_encoder(encoder_layers_dict: dict) -> nn.Sequential:
+    """Builds an encoder from an ordered dict of lists of nn.Module objects."""
     layers = []
-    in_channels = input_channels
-    for out_channels in encoder_channels:
-        padding = kernel_size // 2  # Calculate padding for `same` behavior
-        layers.append(nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, padding=padding))
-        layers.append(nn.MaxPool1d(kernel_size=2))
-        layers.append(activation_fn())
-        layers.append(nn.BatchNorm1d(out_channels))
-        in_channels = out_channels
+    for key in sorted(encoder_layers_dict.keys()):
+        layers.extend(encoder_layers_dict[key])
     return nn.Sequential(*layers)
 
-def build_bottleneck(flat_dim, embed_dim):
-    """Builds the bottleneck layer for 1D data."""
-    # Explicitly calculate the expected input size for the bottleneck layer
-    expected_input_size = flat_dim
+def build_bottleneck(bottleneck_layers_dict: dict) -> tuple[nn.Sequential, nn.Sequential]:
+    """Builds a bottleneck from an ordered dict of lists of nn.Module objects."""
+    embed_layers = bottleneck_layers_dict[0]  # encoder to embedding
+    decode_layers = bottleneck_layers_dict[1] # embedding to expanded
+    return nn.Sequential(*embed_layers), nn.Sequential(*decode_layers)
 
-    layers = [
-        nn.Flatten(),
-        nn.Linear(expected_input_size, embed_dim),  # Use the correct input size
-        nn.Linear(embed_dim, expected_input_size),
-        nn.ReLU()
-    ]
-    return nn.Sequential(*layers)
-
-def build_decoder(decoder_channels, activation_fn, output_length, kernel_size=5):
-    """Builds the decoder for 1D data with `same` padding and ensures it reconstructs the original input size."""
-    padding = kernel_size // 2  # Calculate padding for `same` behavior
+def build_decoder(decoder_layers_dict: dict) -> nn.Sequential:
+    """Builds a decoder from an ordered dict of lists of nn.Module objects."""
     layers = []
-    in_channels = decoder_channels[0]
-    for out_channels in decoder_channels[1:]:
-        layers.append(nn.Upsample(scale_factor=2, mode='linear', align_corners=True))
-        layers.append(nn.ConvTranspose1d(in_channels, out_channels, kernel_size=kernel_size, padding=padding))
-        layers.append(activation_fn())
-        layers.append(nn.BatchNorm1d(out_channels))
-        in_channels = out_channels
-    layers.append(nn.Conv1d(in_channels, 1, kernel_size=kernel_size, padding=padding))  # Final layer to match input channels
-
-    # Ensure the output length matches the original input length
-    layers.append(nn.Upsample(size=output_length, mode='linear', align_corners=True))
-
+    for key in sorted(decoder_layers_dict.keys()):
+        layers.extend(decoder_layers_dict[key])
     return nn.Sequential(*layers)

@@ -1,0 +1,142 @@
+{
+  "GENERAL": {
+    "device": "cuda",
+    "seed": 42,
+    "apply_jit_tracing": false,
+    "use_ddp": true,
+    "use_lr_finder": false,
+    "use_tensorboard": false,
+    "input_length": 320,
+    "input_channels": 1,
+    "input_features": 320,
+    "flattened_features": 320 
+  },
+  "MODEL": {
+    "type": "autoencoder",
+    "input_shape": [1, 320],
+    "embedding_dim": 2,
+    "flattened_dim": 1280,
+    "feature_map_length": 5,
+    "encoder_layers": [
+      [
+        {"type": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 3, "padding": "same"},
+        {"type": "MaxPool1d", "kernel_size": 2, "stride": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 8}
+      ],
+      [
+        {"type": "Conv1d", "in_channels": 8, "out_channels": 16, "kernel_size": 3, "padding": "same"},
+        {"type": "MaxPool1d", "kernel_size": 2, "stride": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 16}
+      ],
+      [
+        {"type": "Conv1d", "in_channels": 16, "out_channels": 32, "kernel_size": 3, "padding": "same"},
+        {"type": "MaxPool1d", "kernel_size": 2, "stride": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 32}
+      ],
+      [
+        {"type": "Conv1d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "padding": "same"},
+        {"type": "MaxPool1d", "kernel_size": 2, "stride": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 64}
+      ],
+      [
+        {"type": "Conv1d", "in_channels": 64, "out_channels": 128, "kernel_size": 3, "padding": "same"},
+        {"type": "MaxPool1d", "kernel_size": 2, "stride": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 128}
+      ],
+      [
+        {"type": "Conv1d", "in_channels": 128, "out_channels": 256, "kernel_size": 3, "padding": "same"},
+        {"type": "MaxPool1d", "kernel_size": 2, "stride": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 256}
+      ]
+    ],
+    "bottleneck_layers": [
+      [
+        {"type": "Flatten"},
+        {"type": "Linear", "in_features": 1280, "out_features": 2}
+      ],
+      [
+        {"type": "Linear", "in_features": 2, "out_features": 1280},
+        {"type": "ReLU"}
+      ]
+    ],
+    "decoder_layers": [
+      [
+        {"type": "Upsample", "scale_factor": 2},
+        {"type": "ConvTranspose1d", "in_channels": 256, "out_channels": 128, "kernel_size": 3, "padding": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 128}
+      ],
+      [
+        {"type": "Upsample", "scale_factor": 2},
+        {"type": "ConvTranspose1d", "in_channels": 128, "out_channels": 64, "kernel_size": 3, "padding": 1},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 64}
+      ],
+      [
+        {"type": "Upsample", "scale_factor": 2},
+        {"type": "ConvTranspose1d", "in_channels": 64, "out_channels": 32, "kernel_size": 3, "padding": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 32}
+      ],
+      [
+        {"type": "Upsample", "scale_factor": 2},
+        {"type": "ConvTranspose1d", "in_channels": 32, "out_channels": 16, "kernel_size": 3, "padding": 1},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 16}
+      ],
+      [
+        {"type": "Upsample", "scale_factor": 2},
+        {"type": "ConvTranspose1d", "in_channels": 16, "out_channels": 8, "kernel_size": 3, "padding": 2},
+        {"type": "ReLU"},
+        {"type": "Dropout", "p": 0.2},
+        {"type": "BatchNorm1d", "num_features": 8}
+      ],
+      [
+        {"type": "Upsample", "scale_factor": 2},
+        {"type": "Conv1d", "in_channels": 8, "out_channels": 1, "kernel_size": 3, "padding": "same"}
+      ]
+    ]
+  },
+  "TRAINING": {
+    "batch_size": 256,
+    "train_size": 0.8,
+    "min_epochs": 300,
+    "max_epochs": 800,
+    "num_workers": 4,
+    "pin_memory": true,
+    "normalization": "minmax",
+    "gradient_clipping": null,
+    "loss_function": "HuberLoss",
+    "early_stopping": {
+      "patience": 50,
+      "delta": 0.0000001
+    }
+  },
+  "LEARNING": {
+    "learning_rate": 0.0005,
+    "scheduled_lr": true,
+    "lr_warmup_epochs": 50,
+    "gamma": 0.5,
+    "milestones": [200, 300, 400, 500]
+  },
+  "INPUTS": {
+    "dataset": "RDFs.npy",
+    "target": null
+  }
+}

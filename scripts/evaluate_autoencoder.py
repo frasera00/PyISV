@@ -10,28 +10,28 @@ from pathlib import Path
 from tqdm import tqdm
 
 from PyISV.utils.set_architecture import import_config
-from PyISV.utils.training_utils import get_device, load_tensor
+from PyISV.utils.training_utils import get_device, load_tensor, is_main_process
 from scripts.train_autoencoder import Trainer
 from PyISV.utils.define_root import PROJECT_ROOT as root_dir
 
 class Evaluator(Trainer):
     """Class to evaluate the autoencoder model."""
-    def __init__(self, config: str | Path,
+    def __init__(self, config_file: str | Path,
                  run_id: str, 
                  models_dir: Optional[str] = None,
                  device: Optional[str] = None) -> None:
         
         # Import config
         self.run_id = run_id
-        self.config = import_config(config)
+        self.config = import_config(config_file)
         self.input_shape = self.config["MODEL"]["input_shape"]
         self.device = device if device else get_device(self.config["GENERAL"]["device"])
         
         # Set paths to directories
         self.root_dir = root_dir
-        self.models_dir = models_dir if models_dir else f"{self.root_dir}/models/{self.run_id}"
-        self._define_paths()
-        self._define_files()
+        self.models_dir = f"{models_dir}/{self.run_id}" if models_dir else f"{self.root_dir}/models/{self.run_id}"
+        self._setup_paths()
+        self._setup_files()
 
         self.eval_folder = f"{self.models_dir}/evaluation"
         Path(self.eval_folder).mkdir(exist_ok=True)
@@ -39,13 +39,19 @@ class Evaluator(Trainer):
         Trainer.prepare_model(self, evaluation_mode=True)
         self.model = self.model.to(self.device)
 
-    def _define_files(self) -> None:
+    def _setup_files(self) -> None:
         self.arch_file = f"{self.models_dir}/arch.dat"
         self.model_file = f"{self.models_dir}/model.pt"
         self.stats_file = f"{self.stats_dir}/stats.dat"
         self.inputs_file = f"{self.inputs_dir}/{self.config['INPUTS']['dataset']}"
-
-    def _define_paths(self) -> None:
+        self.norm_files = {
+            "subval_inputs": f"{self.norms_dir}/subval_inputs.npy",
+            "divval_inputs": f"{self.norms_dir}/divval_inputs.npy",
+            "subval_targets": f"{self.norms_dir}/subval_targets.npy",
+            "divval_targets": f"{self.norms_dir}/divval_targets.npy"
+        }
+        
+    def _setup_paths(self) -> None:
         self.data_dir = f"{self.root_dir}/datasets"
         self.inputs_dir = f"{self.data_dir}/RDFs"
         self.norms_dir = f"{self.models_dir}/norms"
@@ -75,7 +81,7 @@ class Evaluator(Trainer):
             output_names=['output'],
             opset_version=11
         )
-        print(f'Exported ONNX model to: {self.models_dir}/model.onnx')
+        print(f"Exported ONNX model to: {self.models_dir}/model.onnx") if is_main_process() else None
         return
     
     def plot_loss_errors(self, errors: np.ndarray) -> None:
@@ -105,8 +111,8 @@ class Evaluator(Trainer):
 
         # Load saved inputs
         inputs = load_tensor(self.inputs_file)
-        print(f"\nLoaded inputs with shape: {inputs.shape}\n")
-        
+        print(f"\nLoaded inputs with shape: {inputs.shape}") if is_main_process() else None
+
         # Process the data in batches to avoid memory issues
         batch_size = 128
         all_errors, embeddings, outputs = [], [], []
@@ -125,21 +131,19 @@ class Evaluator(Trainer):
                 all_errors.append(errs)
                 embeddings.append(flat_latent.numpy())
                 outputs.append(recon.detach().cpu().numpy())
-                
-                # Print stats for first batch only
-                if i == 0:
-                    print(f"Latent shape: {latent.shape}")
-                    print(f"Latent min/max/mean: {latent.min().item():.5f}, {latent.max().item():.5f}, {latent.mean().item():.5f}")
-                    print(f"Flat latent shape: {flat_latent.shape}")
-        
+            
         # Concatenate results
         errors = np.concatenate(all_errors)
         embeds = np.concatenate(embeddings, axis=0)
         outputs = np.concatenate(outputs, axis=0)
 
+        if is_main_process():
+                print(f"Latent shape: {embeds.shape}")
+                print(f"Reconstructed shape: {outputs.shape}\n")
+
         # Unnormalize outputs
-        outsubval = np.load(self.norm_files['subval'])
-        outdivval = np.load(self.norm_files['divval'])
+        outsubval = np.load(self.norm_files['out_subval'])
+        outdivval = np.load(self.norm_files['out_divval'])
         outputs_denorm = torch.from_numpy( (outputs * outdivval) + outsubval )
 
         self.plot_loss_errors(errors)
@@ -153,7 +157,7 @@ class Evaluator(Trainer):
 
         # Save evaluation summary as JSON
         self.save_evaluation_summary(errors, embeds)
-        print(f"Evaluation results saved to: {self.eval_folder}")
+        print(f"Evaluation results saved to: {self.eval_folder}") if is_main_process() else None
         return
 
     def save_evaluation_summary(self, errors: np.ndarray, embeddings: np.ndarray) -> None:
@@ -184,7 +188,7 @@ class Evaluator(Trainer):
         with open(output_file, 'w') as f:
             json.dump(eval_summary, f, indent=4)
         
-        print(f"\nEvaluation summary saved to: {output_file}")
+        print(f"\nEvaluation summary saved to: {output_file}") if is_main_process() else None
         return
 
 # -------------- Execute the main function --------------- #
@@ -192,15 +196,14 @@ class Evaluator(Trainer):
 if __name__ == "__main__":
     # Parse run ID from command line
     import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--run_id', '-r',type=str)
-    parser.add_argument('--config', '-c', type=str)
-    parser.add_argument('--models_dir', '-m', type=str)
-    args = parser.parse_args()
+    args = argparse.ArgumentParser()
+    config = args.add_argument('--config', '-c', type=str, required=True)
+    models_dir = args.add_argument('--models_dir', '-m', type=str, required=False)
+    run_id = args.add_argument('--run_id', '-r',type=str, required=True)
+    args = args.parse_args()
 
-
-    evaluator = Evaluator(config=args.config, run_id=args.run_id, models_dir=args.models_dir)
+    evaluator = Evaluator(config_file=args.config, run_id=args.run_id, models_dir=args.models_dir)
     evaluator.plot_loss_curve()
     evaluator.evaluate_model()
 
-    print("\nEvaluation completed successfully.")
+    print("\nEvaluation completed successfully.") if is_main_process() else None

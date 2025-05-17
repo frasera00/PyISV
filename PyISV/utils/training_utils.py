@@ -3,15 +3,12 @@
 # This module contains functions to train models, including autoencoders and classifiers.
 # It also includes functions for early stopping, learning rate scheduling, and logging.
 
-import re
-import matplotlib.pyplot as plt
-import numpy as np
-import logging
+import re, os, logging, numpy as np, matplotlib.pyplot as plt
 from pathlib import Path
 from typing import Optional
+
 import torch
 from torch import nn
-from torch.optim.lr_scheduler import MultiStepLR, SequentialLR
 from torch.utils.data import Dataset, DataLoader # type: ignore
 from torch.utils.tensorboard.writer import SummaryWriter
 from torch.utils.data.distributed import DistributedSampler
@@ -288,22 +285,16 @@ def apply_jit(
     return traced_model  # type: ignore
 
 def is_main_process() -> bool:
-    # True only for the main process (not DataLoader workers, not nonzero DDP ranks)
-    try:
-        import torch.distributed as dist
-        if dist.is_available() and dist.is_initialized():
-            if dist.get_rank() != 0:
-                return False
-        # Check for DataLoader worker
-        try:
-            from torch.utils.data import get_worker_info
-            if get_worker_info() is not None:
-                return False
-        except ImportError:
-            pass
-        return True
-    except Exception:
-        return True
+    # For torch.distributed, rank 0 is the main process
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        return torch.distributed.get_rank() == 0
+    # For SLURM or other multi-process setups, check environment variables
+    if "RANK" in os.environ:
+        return int(os.environ["RANK"]) == 0
+    if "SLURM_PROCID" in os.environ:
+        return int(os.environ["SLURM_PROCID"]) == 0
+    # Fallback: single process
+    return True
     
 def setup_logging(log_file: Optional[str] = None, log_level: int = logging.INFO, log_format: str = '%(asctime)s - %(levelname)s - %(message)s') -> None:
     """Set up logging configuration. If log_file is provided, logs will be written to that file.
@@ -331,7 +322,7 @@ def load_tensor(file_path: str) -> torch.Tensor:
         tensor = tensor.unsqueeze(1)
     return tensor
 
-def setup_tensorboard_writer(logs_dir: Path | str, run_id: str) -> tuple[SummaryWriter, str | Path]:
+def setup_tensorboard_writer(logs_dir: Path | str, run_id: str | int) -> tuple[SummaryWriter, str | Path]:
     from torch.utils.tensorboard import SummaryWriter
     tb_log_dir = f"{logs_dir}/tensorboard_{run_id}"
     writer = SummaryWriter(log_dir=tb_log_dir)

@@ -1,6 +1,6 @@
 # This script trains an autoencoder model using PyTorch and the PyISV library.
 
-import os, datetime, time, logging, json, warnings, numpy as np
+import os, datetime, time, logging, json, warnings, numpy as np, shutil
 warnings.filterwarnings("ignore")
 
 import torch, torch.distributed as dist
@@ -22,7 +22,8 @@ class Trainer():
                  run_id: Optional[str | int] = None,
                  models_dir: Optional[str] = None) -> None:
         # Import config
-        self.config = import_config(config_file) if params is None else params
+        self.config_file = config_file
+        self.config = import_config(self.config_file) if params is None else params
         self.device = get_device(device=self.config['GENERAL']['device'])
         self.run_id = run_id if run_id is not None else datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         
@@ -32,7 +33,7 @@ class Trainer():
 
         # Configure paths, dirs and files
         self.root_dir = root_dir
-        self.models_dir = models_dir if models_dir is not None else f"{self.root_dir}/models/{self.run_id}"
+        self.models_dir = f"{models_dir}/{self.run_id}" if models_dir is not None else f"{self.root_dir}/models/{self.run_id}"
         self._define_paths()
         self._setup_dirs()
         self._setup_files()
@@ -52,16 +53,12 @@ class Trainer():
         self.stats_file = f"{self.stats_dir}/stats.dat"
         self.arch_file = f"{self.models_dir}/arch.dat"
         self.norm_files = {
-            "divval_inputs": f"{self.norms_dir}/input_subval.npy",
-            "subval_inputs": f"{self.norms_dir}/input_divval.npy",
-            "divval_targets": f"{self.norms_dir}/output_subval.npy",
-            "subval_targets": f"{self.norms_dir}/output_divval.npy"
+            "subval_inputs": f"{self.norms_dir}/subval_inputs.npy",
+            "divval_inputs": f"{self.norms_dir}/divval_inputs.npy",
+            "subval_targets": f"{self.norms_dir}/subval_targets.npy",
+            "divval_targets": f"{self.norms_dir}/divval_targets.npy"
         }
 
-        # Save config file in the model directory
-        with open(f'{self.models_dir}/config.json', 'w') as f:
-            json.dump(self.config, f, indent=4)
-        
     def _setup_dirs(self) -> None:
         # Create directories if they don't exist
         os.makedirs(self.models_dir, exist_ok=True)
@@ -73,7 +70,7 @@ class Trainer():
     def _define_paths(self) -> None:
         # Define paths for model, logs, and outputs
         self.data_dir = f"{self.root_dir}/datasets"
-        self.logs_dir = f"{self.root_dir}/logs/{self.run_id}"
+        self.logs_dir = f"{self.models_dir}/logs/"
         self.outputs_dir = f"{self.models_dir}/outputs"
         self.norms_dir = f"{self.models_dir}/norms"
         self.stats_dir = f"{self.models_dir}/stats"
@@ -95,32 +92,35 @@ class Trainer():
     
     def _setup_ddp(self) -> None:
         if self.config['GENERAL']['use_ddp']:
-            # Get rank and world size from SLURM environment variables if available
-            if 'SLURM_PROCID' in os.environ:  # We're running under SLURM
+            # If running under torchrun, these are set automatically
+            if 'LOCAL_RANK' in os.environ:
+                local_rank = int(os.environ['LOCAL_RANK'])
+                global_rank = int(os.environ.get('RANK', 0))
+                world_size = int(os.environ.get('WORLD_SIZE', 1))
+            elif 'SLURM_PROCID' in os.environ:  # Fallback for SLURM-only launch
                 local_rank = int(os.environ.get('SLURM_LOCALID', 0))
                 global_rank = int(os.environ.get('SLURM_PROCID', 0))
                 world_size = int(os.environ.get('SLURM_NTASKS', 1))
-                # Set PyTorch distributed environment variables that might not be set by SLURM
                 os.environ['RANK'] = str(global_rank)
                 os.environ['LOCAL_RANK'] = str(local_rank)
                 os.environ['WORLD_SIZE'] = str(world_size)
-                # Use SLURM_NODELIST to get master address if not already set
                 if 'MASTER_ADDR' not in os.environ:
                     import subprocess
                     result = subprocess.run(['scontrol', 'show', 'hostnames', os.environ['SLURM_JOB_NODELIST']], 
                                            stdout=subprocess.PIPE, text=True)
                     os.environ['MASTER_ADDR'] = result.stdout.strip().split('\n')[0]
-                # Use a unique port per SLURM job to avoid collisions
                 if 'MASTER_PORT' not in os.environ:
                     os.environ['MASTER_PORT'] = str(2**15 + (int(os.environ.get('SLURM_JOBID', '0')) % 2**15))
             else:
-                # Fallback for non-SLURM execution (e.g., direct torchrun calls)
-                local_rank = int(os.environ.get('LOCAL_RANK', 0))
-                global_rank = int(os.environ.get('RANK', 0))
-                world_size = int(os.environ.get('WORLD_SIZE', 1))
-            
-            print(f"Using DDP with local rank {local_rank} and world size {world_size}")
-            
+                # Fallback for direct execution
+                local_rank = 0
+                global_rank = 0
+                world_size = 1
+
+            # Print environment for debugging
+            if is_main_process():
+                print(f"[RANK {global_rank}] LOCAL_RANK={local_rank}, WORLD_SIZE={world_size}, CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}")
+
             # Try to use CCL if available, else fall back to nccl/gloo
             try:
                 import intel_extension_for_pytorch
@@ -137,17 +137,16 @@ class Trainer():
                 torch.cuda.set_device(local_rank)
                 self.device = torch.device(f'cuda:{local_rank}')
             else:
-                # For CPU DDP, set device to cpu and optionally set thread affinity
                 self.device = torch.device('cpu')
                 num_threads = int(os.environ.get('OMP_NUM_THREADS', os.cpu_count() or 1))
-                print(f"Using DDP, with {num_threads} CPU threads.")
+                print(f"Using DDP, with {num_threads} CPU threads. ") if is_main_process() else None
                 torch.set_num_threads(num_threads)
                 torch.set_num_interop_threads(2)
             dist.init_process_group(backend=backend)
             torch.distributed.barrier()
         else:
             num_threads = os.cpu_count()
-            print(f"Using {num_threads} CPU threads.")
+            print(f"Using {num_threads} CPU threads. ") if is_main_process() else None
             torch.set_num_threads(num_threads) # type: ignore
             torch.set_num_interop_threads(2)
 
@@ -165,8 +164,9 @@ class Trainer():
 
         # Save normalization params
         for key, value in self.norm_files.items():
-            ds = getattr(dataset, key)
-            np.save(f"{self.norms_dir}/{self.run_id}_{value}", ds.numpy())
+            if hasattr(dataset, key):
+                ds = getattr(dataset, key)
+                np.save(value, ds.numpy())
 
         # Split data
         from sklearn.model_selection import train_test_split
@@ -361,14 +361,14 @@ if __name__ == '__main__':
     import argparse
     
     parser = argparse.ArgumentParser(description='Train an autoencoder model using PyTorch.')
-    parser.add_argument('--config', '-c', type=str, help='Path to the JSON configuration file', required=True)
-    parser.add_argument('--run_id', '-r', type=str, help='Run ID for the training session', required=False)
-    parser.add_argument('--models_dir', '-m', type=str, help='Path to save the models', required=False)
+    config = parser.add_argument('--config', '-c', type=str, help='Path to the JSON configuration file', required=True)
+    models_dir = parser.add_argument('--models_dir', '-m', type=str, help='Path to save the models', required=False)
+    run_id = parser.add_argument('--run_id', '-r', type=str, help='Run ID for the training session', required=False)
 
     args = parser.parse_args()
 
     # Call Trainer
-    trainer = Trainer(args.config, args.run_id, args.models_dir)
+    trainer = Trainer(config_file=args.config, run_id=args.run_id, models_dir=args.models_dir)
     trainer.run_training()
 
     if is_main_process():

@@ -1,43 +1,25 @@
 # This script evaluates the autoencoder model by plotting the training loss curve,
 # reconstructing the input data, and visualizing the latent space using t-SNE.
 
-import datetime
-import argparse
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import warnings
-import json
-
+import datetime, argparse, warnings, json, torch
+import numpy as np, pandas as pd, matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
-import torch
-import torch.distributed as dist
-from torch.nn import DataParallel
-from torch.nn.parallel import DistributedDataParallel as DDP
-from collections import OrderedDict
-from typing import Optional
+from typing import Optional 
 from pathlib import Path
 from tqdm import tqdm
 
-from PyISV.training_utils import (
-    PreloadedDataset, MSELoss, get_device, get_data_loader,
-    load_tensor, is_main_process
-)
-from PyISV.neural_network import NeuralNetwork
-from PyISV.set_architecture import import_config
-from PyISV.validation_utils import Validator
-from PyISV.training_utils import get_device
+from PyISV.utils.set_architecture import import_config
+from PyISV.utils.training_utils import get_device, load_tensor
 from scripts.train_autoencoder import Trainer
-
-# Set paths to directories
-from PyISV.PyISV.define_root import PROJECT_ROOT as root_dir
+from PyISV.utils.define_root import PROJECT_ROOT as root_dir
 
 class Evaluator(Trainer):
     """Class to evaluate the autoencoder model."""
-    def __init__(self, config: str | Path, run_id: str, device: Optional[str] = None) -> None:
-        self.eval_folder = f"{self.model_dir}/evaluation"
-        Path(self.eval_folder).mkdir(exist_ok=True)
+    def __init__(self, config: str | Path,
+                 run_id: str, 
+                 models_dir: Optional[str] = None,
+                 device: Optional[str] = None) -> None:
         
         # Import config
         self.run_id = run_id
@@ -47,8 +29,12 @@ class Evaluator(Trainer):
         
         # Set paths to directories
         self.root_dir = root_dir
+        self.models_dir = models_dir if models_dir else f"{self.root_dir}/models/{self.run_id}"
         self._define_paths()
         self._define_files()
+
+        self.eval_folder = f"{self.models_dir}/evaluation"
+        Path(self.eval_folder).mkdir(exist_ok=True)
 
         Trainer.prepare_model(self, evaluation_mode=True)
         self.model = self.model.to(self.device)
@@ -57,14 +43,14 @@ class Evaluator(Trainer):
         self.arch_file = f"{self.models_dir}/arch.dat"
         self.model_file = f"{self.models_dir}/model.pt"
         self.stats_file = f"{self.stats_dir}/stats.dat"
+        self.inputs_file = f"{self.inputs_dir}/{self.config['INPUTS']['dataset']}"
 
     def _define_paths(self) -> None:
-        self.models_dir = f"{self.root_dir}/models"
-        self.data_dir = f"{self.root_dir}/data"
-        self.norms_dir = f"{self.root_dir}/norms"
-        self.stats_dir = f"{self.root_dir}/stats"
-        self.outputs_dir = f"{self.root_dir}/outputs"
+        self.data_dir = f"{self.root_dir}/datasets"
         self.inputs_dir = f"{self.data_dir}/RDFs"
+        self.norms_dir = f"{self.models_dir}/norms"
+        self.stats_dir = f"{self.models_dir}/stats"
+        self.outputs_dir = f"{self.models_dir}/outputs"
 
     def plot_loss_curve(self) -> None:
         """Plot the training and validation loss curves and optionally save to output_path."""
@@ -118,7 +104,7 @@ class Evaluator(Trainer):
         self.model.eval()
 
         # Load saved inputs
-        inputs = torch.load(self.inputs_dir)
+        inputs = load_tensor(self.inputs_file)
         print(f"\nLoaded inputs with shape: {inputs.shape}\n")
         
         # Process the data in batches to avoid memory issues
@@ -154,7 +140,7 @@ class Evaluator(Trainer):
         # Unnormalize outputs
         outsubval = np.load(self.norm_files['subval'])
         outdivval = np.load(self.norm_files['divval'])
-        outputs_denorm = torch.from_numpy(outputs * outdivval) + outsubval)
+        outputs_denorm = torch.from_numpy( (outputs * outdivval) + outsubval )
 
         self.plot_loss_errors(errors)
         z2d = self.plot_TSNE(embeds)
@@ -209,12 +195,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--run_id', '-r',type=str)
     parser.add_argument('--config', '-c', type=str)
+    parser.add_argument('--models_dir', '-m', type=str)
     args = parser.parse_args()
 
-    RUN_ID = args.run_id
-    CONFIG_FILE = args.config\
 
-    evaluator = Evaluator(CONFIG_FILE, RUN_ID)
+    evaluator = Evaluator(config=args.config, run_id=args.run_id, models_dir=args.models_dir)
     evaluator.plot_loss_curve()
     evaluator.evaluate_model()
 

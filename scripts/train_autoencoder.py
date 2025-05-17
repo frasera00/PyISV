@@ -1,64 +1,43 @@
 # This script trains an autoencoder model using PyTorch and the PyISV library.
 
-import os
-import datetime
-import time 
-import logging
-import datetime
-import numpy as np
-import warnings
-import json
+import os, datetime, time, logging, json, warnings, numpy as np
 warnings.filterwarnings("ignore")
 
-import torch
-import torch.distributed as dist
+import torch, torch.distributed as dist
 from torch.nn import DataParallel
 from torch.nn.parallel import DistributedDataParallel as DDP
 from typing import Optional
 
-from PyISV.training_utils import *
-from PyISV.set_architecture import import_config # type: ignore
+from PyISV.utils.training_utils import *
+from PyISV.utils.validation_utils import Validator   
+from PyISV.utils.set_architecture import import_config
+from PyISV.utils.define_root import PROJECT_ROOT as root_dir
 from PyISV.neural_network import NeuralNetwork 
-from PyISV.validation_utils import Validator   
-
-# Set paths to directories and ID 
-from PyISV.define_root import PROJECT_ROOT as root_dir
 
 # Profiling utilities for performance analysis
-import torch.utils.bottleneck
-import torch.profiler
+import torch.utils.bottleneck, torch.profiler
 
 class Trainer():
-    def __init__(self, config_file: str, params: Optional[dict] = None) -> None:
+    def __init__(self, config_file: str, params: Optional[dict] = None, 
+                 run_id: Optional[str | int] = None,
+                 models_dir: Optional[str] = None) -> None:
+        # Import config
         self.config = import_config(config_file) if params is None else params
-
         self.device = get_device(device=self.config['GENERAL']['device'])
-        self.run_id = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.run_id = run_id if run_id is not None else datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Set defaults
         self.writer = None
         self.best_val_loss = None
 
-        # Dir paths
-        self.model_dir = f"{root_dir}/models/{self.run_id}"
-        self.logs_dir = f"{root_dir}/logs/{self.run_id}"
-        self.outputs_dir = f"{root_dir}/outputs/{self.run_id}"
-        self.norms_dir = f"{root_dir}/norms/{self.run_id}"
-        self.data_dir = f"{root_dir}/datasets"
+        # Configure paths, dirs and files
+        self.root_dir = root_dir
+        self.models_dir = models_dir if models_dir is not None else f"{self.root_dir}/models/{self.run_id}"
+        self._define_paths()
+        self._setup_dirs()
+        self._setup_files()
 
-        # File names
-        self.model_file = f"{self.model_dir}/model.pt"
-        self.stats_file = f"{self.model_dir}/stats/stats.dat"
-        self.arch_file = f"{self.model_dir}/arch.dat"
-
-        self.norm_files = {
-            "divval_inputs": f"input_autoen_scaler_subval.npy",
-            "subval_inputs": f"input_autoen_scaler_divval.npy",
-            "divval_targets": f"output_autoen_scaler_subval.npy",
-            "subval_targets": f"output_autoen_scaler_divval.npy"
-        }
-
-        # Save config file in the model directory
-        with open(f'{self.model_dir}/config.json', 'w') as f:
-            json.dump(self.config, f, indent=4)
+        setup_logging(f"{self.logs_dir}/train.log")
 
         # Set validator, DDP, and run
         self.validator = Validator(self.config)
@@ -66,16 +45,48 @@ class Trainer():
 
         if is_main_process():
             print(f"\nTraining on {self.device} with run ID: {self.run_id}\n")
-            
+
+    def _setup_files(self) -> None:
+        # File names
+        self.model_file = f"{self.models_dir}/model.pt"
+        self.stats_file = f"{self.stats_dir}/stats.dat"
+        self.arch_file = f"{self.models_dir}/arch.dat"
+        self.norm_files = {
+            "divval_inputs": f"{self.norms_dir}/input_subval.npy",
+            "subval_inputs": f"{self.norms_dir}/input_divval.npy",
+            "divval_targets": f"{self.norms_dir}/output_subval.npy",
+            "subval_targets": f"{self.norms_dir}/output_divval.npy"
+        }
+
+        # Save config file in the model directory
+        with open(f'{self.models_dir}/config.json', 'w') as f:
+            json.dump(self.config, f, indent=4)
+        
+    def _setup_dirs(self) -> None:
+        # Create directories if they don't exist
+        os.makedirs(self.models_dir, exist_ok=True)
+        os.makedirs(self.logs_dir, exist_ok=True)
+        os.makedirs(self.outputs_dir, exist_ok=True)
+        os.makedirs(self.norms_dir, exist_ok=True)
+        os.makedirs(self.stats_dir, exist_ok=True)
+
+    def _define_paths(self) -> None:
+        # Define paths for model, logs, and outputs
+        self.data_dir = f"{self.root_dir}/datasets"
+        self.logs_dir = f"{self.root_dir}/logs/{self.run_id}"
+        self.outputs_dir = f"{self.models_dir}/outputs"
+        self.norms_dir = f"{self.models_dir}/norms"
+        self.stats_dir = f"{self.models_dir}/stats"
+
     def run_training(self) -> None:
-        logging.info("Starting training process...")
+        log_main(logging.INFO, "Starting training process...")
         self.prepare_data()
-        logging.info("Data prepared.")
+        log_main(logging.INFO, "Data prepared.")
         self.prepare_model()
-        logging.info("Model prepared.")
+        log_main(logging.INFO, "Model prepared.")
         self.train()
         self._cleanup()
-        logging.info("Training process completed.")
+        log_main(logging.INFO, "Training process completed.")
 
     def _cleanup(self) -> None:
         if self.config['GENERAL']['use_ddp']:
@@ -350,13 +361,14 @@ if __name__ == '__main__':
     import argparse
     
     parser = argparse.ArgumentParser(description='Train an autoencoder model using PyTorch.')
-    parser.add_argument('--config', '-c', type=str, 
-                       default=f"{root_dir}/config_autoencoder_cpu.json",
-                       help='Path to the JSON configuration file')
+    parser.add_argument('--config', '-c', type=str, help='Path to the JSON configuration file', required=True)
+    parser.add_argument('--run_id', '-r', type=str, help='Run ID for the training session', required=False)
+    parser.add_argument('--models_dir', '-m', type=str, help='Path to save the models', required=False)
+
     args = parser.parse_args()
 
     # Call Trainer
-    trainer = Trainer(args.config)
+    trainer = Trainer(args.config, args.run_id, args.models_dir)
     trainer.run_training()
 
     if is_main_process():

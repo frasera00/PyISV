@@ -308,20 +308,13 @@ def is_main_process() -> bool:
 def setup_logging(log_file: Optional[str] = None, log_level: int = logging.INFO, log_format: str = '%(asctime)s - %(levelname)s - %(message)s') -> None:
     """Set up logging configuration. If log_file is provided, logs will be written to that file.
     Removes all existing handlers to ensure this config takes effect."""
-    
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
-    if log_file:
-        logging.basicConfig(
-            filename=log_file,
-            level=log_level,
-            format=log_format
-        )
-    else:
-        logging.basicConfig(
-            level=log_level,
-            format=log_format
-        )
+    logging.basicConfig(
+        filename="train.log" if log_file is None else log_file,
+        level=log_level,
+        format=log_format
+    )
 
 def log_main(level: int, msg: str) -> None:
     if is_main_process():

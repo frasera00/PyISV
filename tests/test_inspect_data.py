@@ -1,7 +1,7 @@
 import torch
 import unittest
 from unittest.mock import patch
-from scripts.inspect_data import inspect_data
+from scripts.analysis.inspect_data import inspect_data
 
 class TestInspectData(unittest.TestCase):
     def mock_torch_load(self, path):

@@ -2,17 +2,10 @@
 # This module defines a neural network class that can be used 
 # for both autoencoding and classification tasks.   
 
-import torch
-import torch.nn as nn
-import torch.jit
-import copy
-from PyISV.model_building import (
-    build_encoder,
-    build_decoder,
-    build_bottleneck,
-)
-from PyISV.training_utils import *
-from PyISV.validation_utils import *
+import torch, torch.nn as nn
+from PyISV.utils.training_utils import *
+from PyISV.utils.validation_utils import *
+from PyISV.model_building import (build_encoder, build_decoder, build_bottleneck)
 
 class NeuralNetwork(nn.Module):
     """NeuralNetwork class for Autoencoder and Classifier.
@@ -30,7 +23,6 @@ class NeuralNetwork(nn.Module):
         self.n_channels = self.flat_dim // self.final_length
 
         self.encoder = build_encoder(self.config["encoder_layers"])
-        
         self.embed_linear, self.decode_linear = build_bottleneck(self.config["bottleneck_layers"])
         self.decoder = build_decoder(self.config["decoder_layers"])
 

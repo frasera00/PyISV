@@ -113,7 +113,7 @@ class InputsReader():
         return params
 
 # Helper function to make it easier to load architecture params
-def import_config(json_path: str | Path) -> dict:
+def import_config(json_path: str | Path) -> dict[str, dict]:
     """Load architecture parameters from a JSON config file."""
     reader = InputsReader(json_path)
     return reader()

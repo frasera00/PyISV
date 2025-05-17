@@ -7,6 +7,7 @@ import logging
 import datetime
 import numpy as np
 import warnings
+import json
 warnings.filterwarnings("ignore")
 
 import torch
@@ -16,34 +17,38 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from typing import Optional
 
 from PyISV.training_utils import *
-from PyISV.set_architecture import import_config
+from PyISV.set_architecture import import_config # type: ignore
 from PyISV.neural_network import NeuralNetwork 
 from PyISV.validation_utils import Validator   
 
 # Set paths to directories and ID 
-from PyISV.define_paths import (
-    MODELS_DIR as models_dir, DATA_DIR as data_dir, OUTPUTS_DIR as outputs_dir,
-    NORMS_DIR as norms_dir, STATS_DIR as stats_dir, LOGS_DIR as logs_dir,
-    PROJECT_ROOT as root_dir
-)
+from PyISV.define_root import PROJECT_ROOT as root_dir
 
 # Profiling utilities for performance analysis
 import torch.utils.bottleneck
 import torch.profiler
 
 class Trainer():
-    def __init__(self, params: dict) -> None:
-        self.config = params
+    def __init__(self, config_file: str, params: Optional[dict] = None) -> None:
+        self.config = import_config(config_file) if params is None else params
+
         self.device = get_device(device=self.config['GENERAL']['device'])
         self.run_id = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         self.writer = None
         self.best_val_loss = None
 
-        # File paths
-        self.model_file = f"{models_dir}/{self.run_id}_model.pt"
-        self.stats_file = f"{stats_dir}/{self.run_id}_stats.dat"
-        self.arch_file = f"{models_dir}/{self.run_id}_arch.dat"
-        
+        # Dir paths
+        self.model_dir = f"{root_dir}/models/{self.run_id}"
+        self.logs_dir = f"{root_dir}/logs/{self.run_id}"
+        self.outputs_dir = f"{root_dir}/outputs/{self.run_id}"
+        self.norms_dir = f"{root_dir}/norms/{self.run_id}"
+        self.data_dir = f"{root_dir}/datasets"
+
+        # File names
+        self.model_file = f"{self.model_dir}/model.pt"
+        self.stats_file = f"{self.model_dir}/stats/stats.dat"
+        self.arch_file = f"{self.model_dir}/arch.dat"
+
         self.norm_files = {
             "divval_inputs": f"input_autoen_scaler_subval.npy",
             "subval_inputs": f"input_autoen_scaler_divval.npy",
@@ -51,16 +56,18 @@ class Trainer():
             "subval_targets": f"output_autoen_scaler_divval.npy"
         }
 
-        # Set validator
+        # Save config file in the model directory
+        with open(f'{self.model_dir}/config.json', 'w') as f:
+            json.dump(self.config, f, indent=4)
+
+        # Set validator, DDP, and run
         self.validator = Validator(self.config)
         self._setup_ddp()
 
         if is_main_process():
-            print(f"Trainer initialized with run ID: {self.run_id}")
-            setup_logging(f"{logs_dir}/{self.run_id}_train.log")
-        self._run()
-
-    def _run(self) -> None:
+            print(f"\nTraining on {self.device} with run ID: {self.run_id}\n")
+            
+    def run_training(self) -> None:
         logging.info("Starting training process...")
         self.prepare_data()
         logging.info("Data prepared.")
@@ -77,19 +84,65 @@ class Trainer():
     
     def _setup_ddp(self) -> None:
         if self.config['GENERAL']['use_ddp']:
-            #print(f"LOCAL_RANK={os.environ.get('LOCAL_RANK')}")
-            #print(f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}")
-            #print(f"World size: {os.environ.get('WORLD_SIZE')}")
-            local_rank = int(os.environ.get('LOCAL_RANK', 0))
-            torch.cuda.set_device(local_rank)
-            self.device = torch.device(f'cuda:{local_rank}')
-            dist.init_process_group(backend="nccl" if torch.cuda.is_available() else "gloo")
-            torch.distributed.barrier()
-            #print(f"Process {local_rank} using torch.cuda.current_device()={torch.cuda.current_device()}, self.device={self.device}")
+            # Get rank and world size from SLURM environment variables if available
+            if 'SLURM_PROCID' in os.environ:  # We're running under SLURM
+                local_rank = int(os.environ.get('SLURM_LOCALID', 0))
+                global_rank = int(os.environ.get('SLURM_PROCID', 0))
+                world_size = int(os.environ.get('SLURM_NTASKS', 1))
+                # Set PyTorch distributed environment variables that might not be set by SLURM
+                os.environ['RANK'] = str(global_rank)
+                os.environ['LOCAL_RANK'] = str(local_rank)
+                os.environ['WORLD_SIZE'] = str(world_size)
+                # Use SLURM_NODELIST to get master address if not already set
+                if 'MASTER_ADDR' not in os.environ:
+                    import subprocess
+                    result = subprocess.run(['scontrol', 'show', 'hostnames', os.environ['SLURM_JOB_NODELIST']], 
+                                           stdout=subprocess.PIPE, text=True)
+                    os.environ['MASTER_ADDR'] = result.stdout.strip().split('\n')[0]
+                # Use a unique port per SLURM job to avoid collisions
+                if 'MASTER_PORT' not in os.environ:
+                    os.environ['MASTER_PORT'] = str(2**15 + (int(os.environ.get('SLURM_JOBID', '0')) % 2**15))
+            else:
+                # Fallback for non-SLURM execution (e.g., direct torchrun calls)
+                local_rank = int(os.environ.get('LOCAL_RANK', 0))
+                global_rank = int(os.environ.get('RANK', 0))
+                world_size = int(os.environ.get('WORLD_SIZE', 1))
             
+            print(f"Using DDP with local rank {local_rank} and world size {world_size}")
+            
+            # Try to use CCL if available, else fall back to nccl/gloo
+            try:
+                import intel_extension_for_pytorch
+                import oneccl_bindings_for_pytorch
+                backend = "ccl"
+                if is_main_process():
+                    print("Using CCL backend for DDP.")
+            except ImportError:
+                backend = "nccl" if torch.cuda.is_available() else "gloo"
+                if is_main_process():
+                    print(f"Using backend: {backend}")
+
+            if torch.cuda.is_available():
+                torch.cuda.set_device(local_rank)
+                self.device = torch.device(f'cuda:{local_rank}')
+            else:
+                # For CPU DDP, set device to cpu and optionally set thread affinity
+                self.device = torch.device('cpu')
+                num_threads = int(os.environ.get('OMP_NUM_THREADS', os.cpu_count() or 1))
+                print(f"Using DDP, with {num_threads} CPU threads.")
+                torch.set_num_threads(num_threads)
+                torch.set_num_interop_threads(2)
+            dist.init_process_group(backend=backend)
+            torch.distributed.barrier()
+        else:
+            num_threads = os.cpu_count()
+            print(f"Using {num_threads} CPU threads.")
+            torch.set_num_threads(num_threads) # type: ignore
+            torch.set_num_interop_threads(2)
+
     def prepare_data(self) -> None:
-        input_file = f"{data_dir}/RDFs/{self.config['INPUTS']['dataset']}"
-        target_file = f"{data_dir}/RDFs/{self.config['INPUTS']['target']}" if self.config['INPUTS'].get('target_path') else None
+        input_file = f"{self.data_dir}/RDFs/{self.config['INPUTS']['dataset']}"
+        target_file = f"{self.data_dir}/RDFs/{self.config['INPUTS']['target']}" if self.config['INPUTS'].get('target_path') else None
         input_data = load_tensor(input_file)
         target_data = load_tensor(target_file) if target_file else input_data.clone()
 
@@ -102,7 +155,7 @@ class Trainer():
         # Save normalization params
         for key, value in self.norm_files.items():
             ds = getattr(dataset, key)
-            np.save(f"{norms_dir}/{self.run_id}_{value}", ds.numpy())
+            np.save(f"{self.norms_dir}/{self.run_id}_{value}", ds.numpy())
 
         # Split data
         from sklearn.model_selection import train_test_split
@@ -118,7 +171,7 @@ class Trainer():
 
         # Save the validation dataset
         torch.save(self.valid_dataset.inputs.detach().cpu(), 
-                   f"{outputs_dir}/{self.run_id}_input_validation_data.pt")
+                   f"{self.outputs_dir}/{self.run_id}_input_validation_data.pt")
         # Samplers and DataLoaders (robust to DDP)
         use_ddp = self.config['GENERAL']['use_ddp']
 
@@ -142,15 +195,34 @@ class Trainer():
             **loader_params
         )
 
-    def prepare_model(self) -> None:
+    def prepare_model(self, evaluation_mode=False) -> None:
         # Model
         self.model = NeuralNetwork(self.config['MODEL']).to(self.device)
-
+        
+        # Use PyTorch optimizations for CPU
+        if self.device.type == "cpu":
+            try:
+                import intel_extension_for_pytorch as ipex
+                self.model = ipex.optimize(self.model)
+                if is_main_process():
+                    print("Using IPEX optimizations for CPU model")
+            except ImportError:
+                if is_main_process():
+                    print("IPEX not available, using standard CPU optimizations")
+                # Apply other CPU optimizations
+                torch._C._jit_set_profiling_executor(True)
+                torch._C._jit_set_profiling_mode(True)
+            
         # DDP/DataParallel
         use_ddp = self.config['GENERAL']['use_ddp']
         local_rank = int(os.environ.get('LOCAL_RANK', 0)) if use_ddp else 0
         if use_ddp and dist.is_initialized():
-            self.model = DDP(self.model, device_ids=[local_rank], find_unused_parameters=False)
+            print(f"Using DDP with local rank {local_rank}")
+            print(f"Device: {self.device}")
+            if self.device.type == "cuda":
+                self.model = DDP(self.model, device_ids=[local_rank], find_unused_parameters=False)
+            else:
+                self.model = DDP(self.model, find_unused_parameters=False)
         elif (torch.cuda.is_available() and torch.cuda.device_count() > 1 and str(self.device).startswith("cuda")):
             self.model = DataParallel(self.model)
 
@@ -159,11 +231,12 @@ class Trainer():
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config['LEARNING']['learning_rate'])
 
         # Callbacks
-        self.save_best_model = SaveBestModel(best_model_name=self.model_file)
-        self.early_stopping = EarlyStopping(
-            patience=self.config['TRAINING']['early_stopping']['patience'],
-            min_delta=self.config['TRAINING']['early_stopping']['delta']
-        )
+        if not evaluation_mode:
+            self.save_best_model = SaveBestModel(best_model_name=self.model_file)
+            self.early_stopping = EarlyStopping(
+                patience=self.config['TRAINING']['early_stopping']['patience'],
+                min_delta=self.config['TRAINING']['early_stopping']['delta']
+            )
 
     def train_loop(self, start_epoch: int = 0) -> None:
         gradient_clipping = self.config['TRAINING'].get('gradient_clipping', None)
@@ -230,8 +303,8 @@ class Trainer():
                 device=self.device,
                 data_loader=self.valid_loader,
                 loss_function=self.loss_function,
-                emb_file=f"{outputs_dir}/{self.run_id}_embeddings.pt",
-                out_file=f"{outputs_dir}/{self.run_id}_outputs_validation_data.pt"
+                emb_file=f"{self.outputs_dir}/{self.run_id}_embeddings.pt",
+                out_file=f"{self.outputs_dir}/{self.run_id}_outputs_validation_data.pt"
             )
 
             log_and_save_metrics(
@@ -261,7 +334,7 @@ class Trainer():
     def train(self) -> None:
         # Optionally set up TensorBoard
         if self.config['GENERAL']['use_tensorboard']:
-            self.writer, tb_log_dir = setup_tensorboard_writer(logs_dir, self.run_id) 
+            self.writer, tb_log_dir = setup_tensorboard_writer(self.logs_dir, self.run_id) 
             log_main(logging.INFO, f'TensorBoard logging enabled at {tb_log_dir}')
 
         # Save stats/model arch
@@ -270,12 +343,21 @@ class Trainer():
         with open(self.arch_file, "w") as f:
             f.write(str(self.model))
 
-        # Train
+        # Run training
         self.train_loop(start_epoch=0)
 
 if __name__ == '__main__':
-    params = import_config(json_path=f"{root_dir}/config_autoencoder.json")
-    trainer = Trainer(params)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Train an autoencoder model using PyTorch.')
+    parser.add_argument('--config', '-c', type=str, 
+                       default=f"{root_dir}/config_autoencoder_cpu.json",
+                       help='Path to the JSON configuration file')
+    args = parser.parse_args()
+
+    # Call Trainer
+    trainer = Trainer(args.config)
+    trainer.run_training()
 
     if is_main_process():
         print("Training completed.")

@@ -74,24 +74,13 @@ class MSELoss(nn.Module):
         loss = criterion(x, y)
         return loss
 
-class HuberLoss(nn.Module):
-    def __init__(self) -> None:
-        super(HuberLoss,self).__init__()
-    def forward(self,
-                x: torch.Tensor,
-                y: torch.Tensor,
-                delta: float) -> torch.Tensor:
-        a = torch.abs(x - y)
-        a = torch.flatten(a)
-        batchsize = a.shape[0]
-        lossval = torch.zeros(batchsize)
-        for i in range(batchsize):
-            if (a[i] <= delta):
-                lossval[i] = 0.5 * (a[i] ** 2.0)
-            else:
-                lossval[i] = delta * (a[i] - 0.5 * delta)
-        loss = torch.sum(lossval) / batchsize
-        return loss
+class HuberLoss(torch.nn.SmoothL1Loss):
+    def __init__(self, delta: float = 1.0) -> None:
+        # PyTorch's SmoothL1Loss is the Huber loss with beta=delta
+        super().__init__(beta=delta, reduction='mean')
+    def forward(self, x: torch.Tensor, y: torch.Tensor, delta: float = 1.0) -> torch.Tensor:
+        # Ignore delta argument for compatibility, use self.beta
+        return super().forward(x, y)
     
 # -- Dataset class -- #
 class Dataset(Dataset): # type: ignore
@@ -299,12 +288,20 @@ def apply_jit(
     return traced_model  # type: ignore
 
 def is_main_process() -> bool:
+    # True only for the main process (not DataLoader workers, not nonzero DDP ranks)
     try:
         import torch.distributed as dist
         if dist.is_available() and dist.is_initialized():
-            return dist.get_rank() == 0
-        else:
-            return True
+            if dist.get_rank() != 0:
+                return False
+        # Check for DataLoader worker
+        try:
+            from torch.utils.data import get_worker_info
+            if get_worker_info() is not None:
+                return False
+        except ImportError:
+            pass
+        return True
     except Exception:
         return True
     
@@ -465,29 +462,67 @@ def train_epoch_step(
     total_loss = 0
     num_batches = 0
 
-    for x, _ in data_loader:
-        x = x.to(device)
-        optimizer.zero_grad(set_to_none=True)  # Zero gradients
-
+    import time
+    data_time = 0.0
+    compute_time = 0.0
+    
+    # Pre-fetch batches to reduce GIL contention
+    batches = []
+    if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
+        logging.info(f"Pre-fetching data for epoch {epoch}...")
+    t_prefetch_start = time.time()
+    for batch in data_loader:
+        batches.append(batch)
+    prefetch_time = time.time() - t_prefetch_start
+    
+    if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
+        logging.info(f"Prefetch completed in {prefetch_time:.2f}s for {len(batches)} batches")
+    
+    # Process batches
+    for batch_idx, (x, _) in enumerate(batches):
+        t0 = time.time()
+        x = x.to(device, non_blocking=True)
+        t1 = time.time()
+        
+        # Zero gradients more efficiently
+        for param in model.parameters():
+            param.grad = None
+        
         # Use autocast for mixed precision
         with torch.amp.autocast( # type: ignore
             device_type='cuda' if device.type == 'cuda' else 'cpu',
-            dtype=torch.bfloat16 if device.type == 'cuda' else torch.float16): 
+            dtype=torch.bfloat16 if device.type == 'cuda' else torch.float32): 
             recon, embed = model(x)
             loss = loss_function(recon, x)
 
-        # Scale the loss and backpropagate
+        # Backward pass
         scaler.scale(loss).backward()
 
-        # Gradient Clipping
         if gradient_clipping is not None:
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
 
         scaler.step(optimizer)
         scaler.update()
 
+        t2 = time.time()
+        data_time += (t1 - t0)
+        compute_time += (t2 - t1)
+
         total_loss += loss.item()
         num_batches += 1
+        
+        # Periodically force synchronization between processes
+        if use_ddp and batch_idx % 10 == 0:
+            torch.cuda.synchronize() if torch.cuda.is_available() else None
+    
+    # Only rank 0 prints timing info DEBUG
+    #if (not torch.distributed.is_initialized()) or torch.distributed.get_rank() == 0:
+    #    print(f"[Epoch {epoch}] Data loading time: {data_time:.2f}s, Compute time: {compute_time:.2f}s")
+    
+    # Free memory
+    del batches
+    
     if num_batches > 0:
         return total_loss / num_batches
     else:

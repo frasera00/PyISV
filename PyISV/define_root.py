@@ -13,13 +13,3 @@ def find_project_root(current: Path, marker: str = "setup.cfg") -> Path:
 # Usage: always resolves to the folder containing the setup.cfg file
 PROJECT_ROOT = find_project_root(Path(__file__).resolve(), marker="setup.cfg")
 
-# Directories relative to project root
-MODELS_DIR = PROJECT_ROOT / 'models'
-DATA_DIR = PROJECT_ROOT / 'data'
-OUTPUTS_DIR = PROJECT_ROOT / 'outputs'
-NORMS_DIR = PROJECT_ROOT / 'norm_vals'
-STATS_DIR = PROJECT_ROOT / 'stats'
-LOGS_DIR = PROJECT_ROOT / 'logs'
-SCRIPTS_DIR = PROJECT_ROOT / 'scripts'
-TESTS_DIR = PROJECT_ROOT / 'tests'
-

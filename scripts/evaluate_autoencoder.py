@@ -17,7 +17,7 @@ from PyISV.utils.define_root import PROJECT_ROOT as root_dir
 class Evaluator(Trainer):
     """Class to evaluate the autoencoder model."""
     def __init__(self, config_file: str | Path,
-                 run_id: str, 
+                 run_id: Optional[str] = None,
                  models_dir: Optional[str] = None,
                  device: Optional[str] = None) -> None:
         
@@ -29,7 +29,12 @@ class Evaluator(Trainer):
         
         # Set paths to directories
         self.root_dir = root_dir
-        self.models_dir = f"{models_dir}/{self.run_id}" if models_dir else f"{self.root_dir}/models/{self.run_id}"
+        if models_dir is None and run_id is not None:
+            self.models_dir = f"{self.root_dir}/models/{self.run_id}"
+        elif models_dir is None and run_id is None:
+            raise ValueError("Either 'run_id' or 'models_dir' must be provided.")
+        else:
+            self.models_dir = models_dir
         self._setup_paths()
         self._setup_files()
 
@@ -199,7 +204,7 @@ if __name__ == "__main__":
     args = argparse.ArgumentParser()
     config = args.add_argument('--config', '-c', type=str, required=True)
     models_dir = args.add_argument('--models_dir', '-m', type=str, required=False)
-    run_id = args.add_argument('--run_id', '-r',type=str, required=True)
+    run_id = args.add_argument('--run_id', '-r',type=str, required=False)
     args = args.parse_args()
 
     evaluator = Evaluator(config_file=args.config, run_id=args.run_id, models_dir=args.models_dir)

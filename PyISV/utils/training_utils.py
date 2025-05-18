@@ -145,7 +145,9 @@ class Dataset(Dataset): # type: ignore
         return self.inputs[idx], self.targets[idx]
 
     def rescale(self,
-                x: torch.Tensor, minval: torch.Tensor, rangeval: torch.Tensor) -> torch.Tensor:
+                x: torch.Tensor, 
+                minval: torch.Tensor,
+                rangeval: torch.Tensor) -> torch.Tensor:
         dataset_size = x.shape[0]
         sample_size = x.shape[1:]
         subval = torch.Tensor(minval).unsqueeze(0).expand(dataset_size, *sample_size)

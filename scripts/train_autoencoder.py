@@ -139,14 +139,16 @@ class Trainer():
             else:
                 self.device = torch.device('cpu')
                 num_threads = int(os.environ.get('OMP_NUM_THREADS', os.cpu_count() or 1))
-                print(f"Using DDP, with {num_threads} CPU threads. ") if is_main_process() else None
+                if is_main_process():
+                    print(f"Using DDP, with {num_threads} CPU threads. ")
                 torch.set_num_threads(num_threads)
                 torch.set_num_interop_threads(2)
             dist.init_process_group(backend=backend)
             torch.distributed.barrier()
         else:
             num_threads = os.cpu_count()
-            print(f"Using {num_threads} CPU threads. ") if is_main_process() else None
+            if is_main_process():
+                print(f"Using {num_threads} CPU threads. ")
             torch.set_num_threads(num_threads) # type: ignore
             torch.set_num_interop_threads(2)
 

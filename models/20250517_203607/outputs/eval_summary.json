@@ -1,0 +1,20 @@
+{
+    "run_id": null,
+    "evaluation_time": "2025-05-19 15:13:09",
+    "error_stats": {
+        "mean": 0.02933662198483944,
+        "median": 0.01805916242301464,
+        "std": 0.018554318696260452,
+        "min": 0.01163577288389206,
+        "max": 0.05785698816180229,
+        "count": 72000
+    },
+    "latent_space": {
+        "dimensions": 2,
+        "samples": 72000
+    },
+    "model_info": {
+        "config_path": "/leonardo_scratch/large/userexternal/fraseraf/PyISV/models/20250517_203607",
+        "architecture": "arch.dat"
+    }
+}

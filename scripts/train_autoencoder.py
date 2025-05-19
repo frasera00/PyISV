@@ -184,7 +184,7 @@ class Trainer():
 
         # Save the validation dataset
         torch.save(self.valid_dataset.inputs.detach().cpu(), 
-                   f"{self.outputs_dir}/{self.run_id}_input_validation_data.pt")
+                   f"{self.outputs_dir}/input_validation_data.pt")
         # Samplers and DataLoaders (robust to DDP)
         use_ddp = self.config['GENERAL']['use_ddp']
 
@@ -316,8 +316,8 @@ class Trainer():
                 device=self.device,
                 data_loader=self.valid_loader,
                 loss_function=self.loss_function,
-                emb_file=f"{self.outputs_dir}/{self.run_id}_embeddings.pt",
-                out_file=f"{self.outputs_dir}/{self.run_id}_outputs_validation_data.pt"
+                emb_file=f"{self.outputs_dir}/embeddings.pt",
+                out_file=f"{self.outputs_dir}/outputs_validation_data.pt"
             )
 
             log_and_save_metrics(

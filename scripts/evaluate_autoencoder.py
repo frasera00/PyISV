@@ -78,15 +78,18 @@ class Evaluator(Trainer):
         """Export the model to ONNX format."""
         import torch.onnx
         dummy_input = torch.randn(1, *self.input_shape, device=self.device)
+        # Unwrap DataParallel if necessary
+        model_to_export = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
         torch.onnx.export(
-            self.model, # type: ignore
+            model_to_export, # type: ignore
             dummy_input, # type: ignore
             f"{self.models_dir}/model.onnx",
             input_names=['input'],
             output_names=['output'],
             opset_version=11
         )
-        print(f"Exported ONNX model to: {self.models_dir}/model.onnx") if is_main_process() else None
+        if is_main_process():
+            print(f"Exported ONNX model to: {self.models_dir}/model.onnx")
         return
     
     def plot_loss_errors(self, errors: np.ndarray) -> None:
@@ -147,9 +150,9 @@ class Evaluator(Trainer):
                 print(f"Reconstructed shape: {outputs.shape}\n")
 
         # Unnormalize outputs
-        outsubval = np.load(self.norm_files['out_subval'])
-        outdivval = np.load(self.norm_files['out_divval'])
-        outputs_denorm = torch.from_numpy( (outputs * outdivval) + outsubval )
+        outsubval = np.load(self.norm_files['subval_targets'])
+        outdivval = np.load(self.norm_files['divval_targets'])
+        outputs_denorm = torch.from_numpy((outputs * outdivval) + outsubval)
 
         self.plot_loss_errors(errors)
         z2d = self.plot_TSNE(embeds)

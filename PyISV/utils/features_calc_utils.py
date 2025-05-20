@@ -70,36 +70,114 @@ def compute_ase_idx_distances(conf, indices1, indices2=None, mic=False):
         return np.array([])
     return np.hstack(dist_list)
 
-def triple_kde_calc(specie1, specie2, conf, bins, bw, mic=False):
-    there_is_s1 = False
-    there_is_s2 = False
-   
-    indices_specie1 = [atom.index for atom in conf if atom.symbol == specie1] 
-    indices_specie2 = [atom.index for atom in conf if atom.symbol == specie2]
+def triple_kde_calc(specie1, specie2, atoms, bins, bandwidth, mic=False):
+    """Calculate RDFs for all combinations of two species in an alloy.
     
-    if len(indices_specie1) > 1:
-        there_is_s1 = True
-    if len(indices_specie2) > 1:
-        there_is_s2 = True 
+    Returns a tuple of three tensors (s1_s1_rdf, s2_s2_rdf, s1_s2_rdf).
+    Each tensor has shape [n_bins].
+    """
     
-    num_bins = len(bins)
-    s1_s1_rdf = torch.zeros(num_bins, dtype=torch.float32)
-    s2_s2_rdf = torch.zeros(num_bins, dtype=torch.float32)
-    s1_s2_rdf = torch.zeros(num_bins, dtype=torch.float32)
-
-    if there_is_s1:
-        s1_s1_dist = compute_pairwise_distances(conf, indices_specie1, indices2=[], mic=mic)
-        s1_s1_rdf = torch_kde_calc(torch.Tensor(s1_s1_dist), bins, bw)
-
-    if there_is_s2:
-        s2_s2_dist = compute_pairwise_distances(conf, indices_specie2, indices2=[], mic=mic)
-        s2_s2_rdf = torch_kde_calc(torch.Tensor(s2_s2_dist), bins, bw)
-
-    if (len(indices_specie1) > 0) and (len(indices_specie2) > 0):    
-        s1_s2_dist = compute_pairwise_distances(conf, indices_specie1, indices2=indices_specie2, mic=mic)
-        s1_s2_rdf = torch_kde_calc(torch.Tensor(s1_s2_dist), bins, bw)       
+    # Get atom symbols for indexing
+    symbols = atoms.get_chemical_symbols()
+    
+    # Find indices for each species
+    indices_specie1 = [i for i, s in enumerate(symbols) if s == specie1]
+    indices_specie2 = [i for i, s in enumerate(symbols) if s == specie2]
+    
+    # Get distances for each species combination
+    s1_s1_dist = compute_ase_idx_distances(atoms, indices_specie1, indices2=None, mic=mic)
+    s2_s2_dist = compute_ase_idx_distances(atoms, indices_specie2, indices2=None, mic=mic)
+    s1_s2_dist = compute_ase_idx_distances(atoms, indices_specie1, indices2=indices_specie2, mic=mic)
+    
+    # Calculate RDFs
+    s1_s1_rdf = torch_kde_calc(torch.tensor(s1_s1_dist), bins, bandwidth) if len(s1_s1_dist) > 0 else torch.zeros_like(bins)
+    s2_s2_rdf = torch_kde_calc(torch.tensor(s2_s2_dist), bins, bandwidth) if len(s2_s2_dist) > 0 else torch.zeros_like(bins)
+    s1_s2_rdf = torch_kde_calc(torch.tensor(s1_s2_dist), bins, bandwidth) if len(s1_s2_dist) > 0 else torch.zeros_like(bins)
     
     return s1_s1_rdf, s2_s2_rdf, s1_s2_rdf
+
+def multi_channel_rdf(species_list, atoms, bins, bandwidth, mic=False):
+    """Calculate RDFs for all species pairs as separate channels."""
+    n_species = len(species_list)
+    n_pairs = (n_species * (n_species + 1)) // 2  # Number of unique pairs
+    
+    # Initialize output tensor with shape [n_pairs, n_bins]
+    rdfs = torch.zeros((n_pairs, bins.size(0)), dtype=torch.float32)
+    
+    # Calculate RDFs for all pairs
+    pair_idx = 0
+    for i, species1 in enumerate(species_list):
+        for j in range(i, n_species):
+            species2 = species_list[j]
+            if species1 == species2:
+                # Same species
+                symbols = atoms.get_chemical_symbols()
+                indices = [k for k, s in enumerate(symbols) if s == species1]
+                dist = compute_ase_idx_distances(atoms, indices, mic=mic)
+                if len(dist) > 0:
+                    rdfs[pair_idx] = torch_kde_calc(torch.tensor(dist), bins, bandwidth)
+            else:
+                # Different species
+                s1_s1, s2_s2, s1_s2 = triple_kde_calc(species1, species2, atoms, bins, bandwidth, mic)
+                rdfs[pair_idx] = s1_s2
+            pair_idx += 1
+            
+    return rdfs
+
+def concatenated_rdf(species_list, atoms, bins, bandwidth, mic=False):
+    """Concatenate all RDFs into a single vector."""
+    # Get multi-channel RDFs first
+    multi_rdfs = multi_channel_rdf(species_list, atoms, bins, bandwidth, mic)
+    
+    # Flatten into a single vector
+    return multi_rdfs.reshape(-1)
+
+def weighted_attention_rdf(species_list, atoms, bins, bandwidth, mic=False):
+    """Use composition-weighted attention for RDFs."""
+    # Get atom symbols and count species
+    symbols = atoms.get_chemical_symbols()
+    total_atoms = len(symbols)
+    n_species = len(species_list)  # Define n_species from species_list
+    
+    # Calculate species concentrations
+    concentrations = {}
+    for species in species_list:
+        count = symbols.count(species)
+        concentrations[species] = count / total_atoms if total_atoms > 0 else 0
+    
+    # Get multi-channel RDFs
+    multi_rdfs = multi_channel_rdf(species_list, atoms, bins, bandwidth, mic)
+    
+    # Compute weighted sum based on pair concentrations
+    pair_idx = 0
+    weighted_rdf = torch.zeros_like(bins)
+    
+    for i, species1 in enumerate(species_list):
+        for j in range(i, n_species):
+            species2 = species_list[j]
+            
+            # Calculate pair weight (product of concentrations)
+            if species1 == species2:
+                weight = concentrations[species1] ** 2
+            else:
+                weight = 2 * concentrations[species1] * concentrations[species2]
+                
+            # Add weighted contribution
+            weighted_rdf += weight * multi_rdfs[pair_idx]
+            pair_idx += 1
+            
+    return weighted_rdf
+
+def alloy_rdf(species_list, atoms, bins, bandwidth, approach="multi_channel", mic=False):
+    """Calculate RDFs for alloys using the specified approach."""
+    if approach == "multi_channel":
+        return multi_channel_rdf(species_list, atoms, bins, bandwidth, mic)
+    elif approach == "concatenated":
+        return concatenated_rdf(species_list, atoms, bins, bandwidth, mic)
+    elif approach == "weighted_attention":
+        return weighted_attention_rdf(species_list, atoms, bins, bandwidth, mic)
+    else:
+        raise ValueError(f"Unknown approach: {approach}. Choose 'multi_channel', 'concatenated', or 'weighted_attention'.")
 
 def single_kde_calc(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor, mic=False) -> torch.Tensor:
     distances = compute_ase_all_distances(Atoms, mic=mic)
@@ -107,16 +185,12 @@ def single_kde_calc(Atoms, bins: torch.Tensor, bandwidth: torch.Tensor, mic=Fals
         return torch.zeros_like(bins)
     return torch_kde_calc(torch.Tensor(distances), bins, bandwidth)  # Return as a PyTorch tensor
 
+
 def build_rdf(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path, device,
-              mic=False, fraction=1.0, mode="single", specie1=None, specie2=None):
-    """Builds RDFs (single or triple) and saves them as images."""
-
-    # Log the input parameters
-    logging.info("Parameters:")
-    logging.info(f"xyz_path: {xyz_path}")
-    logging.info(f"min_dist: {min_dist}, max_dist: {max_dist}, n_bins: {n_bins}, bandwidth: {bandwidth}")
-    logging.info(f"fraction: {fraction}, mode: {mode}")
-
+              mic=False, fraction=1.0, mode="single", species_list=None, approach="multi_channel"):
+    """Builds RDFs (single, triple, or alloy) and saves them as images.
+        For alloy mode: "multi_channel", "concatenated", or "weighted_attention"
+    """
     # Load frames & labels
     frames = read(xyz_path, index=":")
     N = len(frames)
@@ -125,18 +199,66 @@ def build_rdf(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path, devi
 
     # Select subset of frames
     n_sub = int(N * fraction)
-    perm = torch.randperm(N)[:n_sub] if n_sub < 1 else torch.arange(n_sub)
+    perm = torch.randperm(N)[:n_sub] if fraction < 1.0 else torch.arange(n_sub)
 
-    shape = [n_sub, 1] + [n_bins]
-    images = torch.empty(shape, dtype=torch.float32)
-
-    # Predefine the RDF computation logic based on the mode
+    # Determine shape and RDF computation function based on mode
     if mode == "single":
-        rdf_computation = lambda atoms: single_kde_calc_torch(atoms, bins, bw, device=device, mic=mic)
+        rdf_computation = lambda atoms: single_kde_calc(atoms, bins, bw, mic=mic)
+        shape = [n_sub, 1, n_bins]
+        
     elif mode == "triple":
-        rdf_computation = lambda atoms: triple_kde_calc(specie1, specie2, atoms, bins, bw, mic=mic)
+        if not species_list or len(species_list) != 2:
+            raise ValueError("Triple mode requires exactly 2 species in species_list")
+        specie1, specie2 = species_list[:2]
+        
+        # For triple mode, we need to handle the tuple return value
+        def triple_rdf_wrapper(atoms):
+            s1_s1, s2_s2, s1_s2 = triple_kde_calc(specie1, specie2, atoms, bins, bw, mic=mic)
+            return torch.stack([s1_s1, s2_s2, s1_s2])
+            
+        rdf_computation = triple_rdf_wrapper
+        shape = [n_sub, 3, n_bins]  # 3 channels: s1-s1, s2-s2, s1-s2
+        
+    elif mode == "alloy":
+        if not species_list:
+            raise ValueError("Species list is required for alloy mode")
+            
+        # Shape depends on the approach
+        if approach == "multi_channel":
+            n_species = len(species_list)
+            n_pairs = (n_species * (n_species + 1)) // 2
+            shape = [n_sub, n_pairs, n_bins]
+            rdf_computation = lambda atoms: multi_channel_rdf(species_list, atoms, bins, bw, mic=mic)
+            
+        elif approach == "concatenated":
+            n_species = len(species_list)
+            n_pairs = (n_species * (n_species + 1)) // 2
+            shape = [n_sub, 1, n_pairs * n_bins]
+            
+            # Need to reshape the output to match expected shape
+            def concat_rdf_wrapper(atoms):
+                flat_rdf = concatenated_rdf(species_list, atoms, bins, bw, mic=mic)
+                return flat_rdf.reshape(1, -1)  # Add channel dimension
+                
+            rdf_computation = concat_rdf_wrapper
+            
+        elif approach == "weighted_attention":
+            shape = [n_sub, 1, n_bins]
+            
+            # Add channel dimension for weighted RDF
+            def weighted_rdf_wrapper(atoms):
+                rdf = weighted_attention_rdf(species_list, atoms, bins, bw, mic=mic)
+                return rdf.reshape(1, -1)  # Add channel dimension
+                
+            rdf_computation = weighted_rdf_wrapper
+            
+        else:
+            raise ValueError(f"Unknown approach: {approach}")
     else:
-        raise ValueError("Invalid mode. Choose 'single' or 'triple'.")
+        raise ValueError("Invalid mode. Choose 'single', 'triple', or 'alloy'.")
+
+    # Initialize output tensor with appropriate shape
+    images = torch.empty(shape, dtype=torch.float32)
 
     # Process frames sequentially
     t0 = time.time()
@@ -144,54 +266,28 @@ def build_rdf(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path, devi
         atoms = frames[frame_i]
 
         # compute RDF using the pre-defined logic
-        rdf_out = rdf_computation(atoms)
-
-        # handle returns: could be np.ndarray or torch.Tensor
-        if isinstance(rdf_out, np.ndarray):
-            rdf = torch.from_numpy(rdf_out).float()
-        else:
-            rdf = rdf_out.cpu().float()
-
-        # if shape is (1, num_bins), squeeze to (num_bins,)
-        if rdf.ndimension() == 2 and rdf.size(0) == 1:
-            rdf = rdf.squeeze(0)
-        elif rdf.ndimension() != 1:
-            raise ValueError(f"Unexpected RDF shape {rdf.shape}")
-
-        images[out_i, 0] = rdf
+        rdf = rdf_computation(atoms)
+        
+        # Handle different output shapes
+        if mode == "single":
+            images[out_i, 0] = rdf.squeeze(0) if rdf.dim() > 1 else rdf
+        elif mode == "triple":
+            # Ensure rdf has the right shape [3, n_bins] to match images[out_i] with shape [3, n_bins]
+            if rdf.dim() == 3 and rdf.size(1) == 1:  # If shape is [3, 1, n_bins]
+                images[out_i] = rdf.squeeze(1)  # Squeeze to [3, n_bins]
+            else:
+                images[out_i] = rdf  # Already correct shape
+        elif mode == "alloy":
+            if approach == "multi_channel":
+                images[out_i] = rdf
+            elif approach == "concatenated" or approach == "weighted_attention":
+                images[out_i, 0] = rdf.squeeze(0) if rdf.dim() > 1 else rdf  # Ensure correct shape
 
     elapsed = time.time() - t0
     logging.info(f"Computed {n_sub}/{N} frames in {elapsed:.2f}s ({elapsed/n_sub:.3f}s each)")
 
-    # Save images
-    img_path   = os.path.join(output_path, f"rdf_images.pt")
+    # Save images with informative filename
+    img_path = os.path.join(output_path, f"rdf_images_{mode}_{approach}.pt")
     torch.save(images, img_path)
     
-    logging.info(f"Saved RDF images to {img_path}")
-    logging.info("RDF computation completed.")
-
-def build_rdf_alt(xyz_path, min_dist, max_dist, n_bins, bandwidth, output_path, mic=False):
-    """Builds RDFs using a fast approach and saves them as a torch object."""
-    configurations = read(xyz_path, index=":")
-
-    # Prepare bins and bandwidth
-    bins = torch.linspace(min_dist, max_dist, n_bins)
-    bw = torch.Tensor([bandwidth])
-
-    rdfs = []
-    t0 = time.time()
-    for conf in tqdm(configurations):
-        if mic:
-            conf.set_pbc(True)
-            conf = conf.repeat(2)
-        conf_rdf = single_kde_calc_torch(conf, bins, bw, mic=mic)
-        rdfs.append(conf_rdf)
-
-    elapsed_time = time.time() - t0
-    logging.info(f"Done, Elapsed time: {elapsed_time:.3f} s")
-
-    rdfs = torch.vstack(rdfs)
-    torch.save(rdfs, os.path.join(output_path,'rdfs.pt'))
-
-    logging.info(f"Saved RDFs to {output_path}")
-
+    return images

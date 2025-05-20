@@ -6,8 +6,8 @@ from PyISV.utils.define_root import PROJECT_ROOT as root_dir
 from PyISV.utils.features_calc_utils import build_rdf
 
 # Define global constants for testing purposes
-XYZ_PATH = f"{root_dir}/data/structures/full_min_ptmd_m18_nCu_0.xyz"
-OUTPUT_DIR = f"{root_dir}/data/RDFs"
+XYZ_PATH = f"{root_dir}/datasets/alloy_structures/full_min_ptmd_m18_nCu_6.xyz"
+OUTPUT_DIR = f"{root_dir}/datasets/RDFs"
 MIN_DIST = 1.0
 MAX_DIST = 12.0
 N_BINS = 340
@@ -18,7 +18,7 @@ if __name__ == "__main__":
     print("Starting RDF computation...")
     try:
         # Run the RDF computation
-        build_rdf(
+        rdf_alloy = build_rdf(
             xyz_path=XYZ_PATH,
             min_dist=MIN_DIST,
             max_dist=MAX_DIST,
@@ -26,7 +26,12 @@ if __name__ == "__main__":
             bandwidth=BANDWIDTH,
             output_path=OUTPUT_DIR,
             device=DEVICE,
+            mode="alloy",
+            species_list=["Cu", "Ag"],
+            approach="weighted",
+            fraction=1.0
         )
+
     except Exception as e:
         print(f"Error during RDF computation: {e}")
     finally:

@@ -23,26 +23,53 @@ class NeuralNetwork(nn.Module):
         self.n_channels = self.flat_dim // self.final_length
 
         self.encoder = build_encoder(self.config["encoder_layers"])
-        self.embed_linear, self.decode_linear = build_bottleneck(self.config["bottleneck_layers"])
+        self.bottleneck = build_bottleneck(self.config["bottleneck_layers"])
         self.decoder = build_decoder(self.config["decoder_layers"])
+        self.embed_linear = self.bottleneck[0]
+        self.decode_linear = self.bottleneck[1]
+        
+        # Store the last embedding for later access
+        self.last_embedding = None
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         z = self.encoder(x)
         z_flat = z.view(z.size(0), -1)  # Flatten the tensor
         embedding = self.embed_linear(z_flat)
+        
+        # Store embedding for later access
+        self.last_embedding = embedding.detach().clone()
+
+        # Pass through the bottleneck
         z_expanded = self.decode_linear(embedding)
 
         # Calculate the correct dimensions for reshaping
         z_out = z_expanded.view(z.size(0), self.n_channels, self.final_length)
-        reconstructed = self.decoder(z_out)
-
-        # Output shape handling: crop or pad to match input length
+        output = self.decoder(z_out)
+        recon = self._reshape_output(x=x, recon=output)
+        return recon
+    
+    def _reshape_output(self, x: torch.Tensor, recon: torch.Tensor) -> torch.Tensor:
         input_length = x.shape[-1]
-        output_length = reconstructed.shape[-1]
+        output_length = recon.shape[-1]
         if output_length > input_length:
-            reconstructed = reconstructed[..., :input_length]
+            recon = recon[..., :input_length]
         elif output_length < input_length:
             pad_amount = input_length - output_length
-            reconstructed = torch.nn.functional.pad(reconstructed, (0, pad_amount))
+            recon = torch.nn.functional.pad(
+                recon, 
+                (0, pad_amount)
+            )
+        return recon
 
-        return reconstructed, embedding
+    def get_embedding(self, x: torch.Tensor) -> torch.Tensor:
+        """Extract embeddings from input data without reconstruction"""
+        self.eval()  # Set to evaluation mode
+        with torch.no_grad():
+            z = self.encoder(x)
+            z_flat = z.view(z.size(0), -1)
+            embedding = self.embed_linear(z_flat)
+        return embedding
+    
+    def get_last_embedding(self) -> torch.Tensor | None:
+        """Return the last computed embedding"""
+        return self.last_embedding

@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore")
 import torch, torch.distributed as dist
 from torch.nn import DataParallel
 from torch.nn.parallel import DistributedDataParallel as DDP
-from typing import Optional
+from typing import Optional, Union
 
 from PyISV.utils.IO_utils import (
     load_tensor, setup_logging, is_main_process
@@ -17,27 +17,29 @@ from PyISV.utils.training_utils import (
     EarlyStopping, SaveBestModel, Dataset, PreloadedDataset
 )
 from PyISV.utils.validation_utils import Validator   
-from PyISV.utils.set_architecture import import_config
-from PyISV.utils.define_root import PROJECT_ROOT as root_dir
+from PyISV.utils.IO_utils import import_config, find_project_root
 from PyISV.neural_network import NeuralNetwork 
 
 # Profiling utilities for performance analysis
 import torch.utils.bottleneck, torch.profiler
 
+root_dir = find_project_root()
+
 class Trainer():
     def __init__(self, 
-        params_dict: dict | None = None, 
-        json_file: str | None = None,   
-        run_id: Optional[str | int] = None,
+        params_dict: Optional[dict], 
+        json_file: Optional[str],   
+        run_id: Optional[Union[str, int]],
         models_dir: Optional[str] = None,
         logging: Optional[bool] = True,
         debug: Optional[bool] = False) -> None:
 
         # Import config
+        self.config = {}
         if params_dict is not None:
-            self.config = import_config(param_dict=params_dict)
+            self.config = import_config(param_dict=params_dict, json_file=None)
         elif json_file is not None:
-            self.config = import_config(json_file=json_file)
+            self.config = import_config(param_dict=None, json_file=json_file)
         else:
             raise ValueError("Either param_dict or json_file must be provided.")
         
@@ -66,7 +68,7 @@ class Trainer():
             self._setup_ddp()
         
         if is_main_process():
-            print(f"\nTraining on {self.device.type} with run ID: {self.run_id}\n")
+            print(f"\n🟢 Training on {self.device.type}\n🆔: {self.run_id}\n")
 
     def prepare_data(self, verbose: bool=True) -> None:
         input_file = self.config['INPUTS']['dataset']
@@ -150,10 +152,10 @@ class Trainer():
                 import intel_extension_for_pytorch as ipex # type: ignore
                 self.model = ipex.optimize(self.model)
                 if is_main_process():
-                    print("ℹ️  Using IPEX optimizations for CPU model")
+                    print("ℹ  Using IPEX optimizations for CPU model")
             except ImportError:
                 if is_main_process():
-                    print("ℹ️  IPEX not available, using standard CPU optimizations")
+                    print("ℹ IPEX not available, using standard CPU optimizations")
                 # Apply other CPU optimizations
                 torch._C._jit_set_profiling_executor(True)
                 torch._C._jit_set_profiling_mode(True)
@@ -170,12 +172,16 @@ class Trainer():
             str(self.device).startswith("cuda") and self.use_paral):
             self.model = DataParallel(self.model)
             if is_main_process():
-                print(f"ℹ️  Using DataParallel with {torch.cuda.device_count()} GPUs")
+                print(f"ℹ  Using DataParallel with {torch.cuda.device_count()} GPUs")
         else:
-            print(f"ℹ️  Using single GPU: {self.device}")
+            print(f"ℹ  Using single GPU: {self.device}")
         
         # Loss and optimizer
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), 
+            lr=self.lr,
+            weight_decay=self.wght_dcay if self.wght_dcay else 0.0
+        )
 
         # Callbacks
         if not evaluation_mode:
@@ -188,25 +194,31 @@ class Trainer():
         if (self.best_loss is None) or (val_loss < self.best_loss):
             self.save_best_model(model=self.model, current_valid_loss=val_loss,
                 current_train_loss=total_loss,epoch=epoch, optimizer=self.optimizer)
-        self.best_loss = val_loss
+            self.best_loss = val_loss
 
-    def step_lr(self, lr_scheduler: "torch.optim.lr_scheduler._LRScheduler | torch.optim.lr_scheduler.LRScheduler") -> float:
+    def step_lr(self, lr_scheduler: Union[torch.optim.lr_scheduler._LRScheduler, torch.optim.lr_scheduler.LRScheduler]) -> float:
         current_lr = lr_scheduler.get_last_lr()[0]
         lr_scheduler.step()
         return current_lr
     
+    def _collect_stats(self, stats, t0, epoch, total_loss, val_loss, current_lr) -> None:
+        stats['epoch'].append(epoch + 1)
+        stats['train_loss'].append(total_loss)
+        stats['val_loss'].append(val_loss)
+        stats['learning_rate'].append(current_lr)
+        stats['time'].append(time.time() - t0)
+    
     def train(self, start_epoch: int = 0, verbose: bool = True, log_interval: int = 10) -> None:
         if verbose and is_main_process():
-            print(f"ℹ️ Model type: {type(self.model)}")
-            print(f"ℹ️ Device: {self.device}")
-            print(f"ℹ️ Use DDP: {self.use_ddp}")
-            print(f"ℹ️ Train loader length: {len(self.train_loader)}")
-            print(f"ℹ️ Loss function: {self.loss_fn}")
+            print(f"ℹ Model type: {type(self.model)}")
+            print(f"ℹ Device: {self.device}")
+            print(f"ℹ Use DDP: {self.use_ddp}")
+            print(f"ℹ Loss function: {self.loss_fn}")
 
         self.best_loss = None
 
         if self.sch_lr:
-            self.sch_params = self.config['TRAINING']['scheduled_params']
+            self.sch_params = self.config['TRAINING']['scheduler_params']
             lr_scheduler = setup_lr_scheduler_with_warmup(
                 optimizer=self.optimizer,
                 params=self.sch_params
@@ -215,15 +227,15 @@ class Trainer():
         scaler = torch.amp.GradScaler(enabled=True) # type: ignore
 
         if verbose and is_main_process():
-            print(f"\n▶️ Starting training from epoch {start_epoch} to {self.max_epcs}\n")
+            print(f"\n▶ Starting training from epoch {start_epoch} to {self.max_epcs}\n")
 
-        learn_rate = []
-        stats = {}
+        stats = {'epoch': [], 'train_loss': [], 'val_loss': [], 'learning_rate': [], 'time': []}
         t0 = time.time()
+        t0_log = t0
+        current_lr = self.lr
         for epoch in range(start_epoch, self.max_epcs):
             if self.sch_lr:
                 current_lr = self.optimizer.param_groups[0]['lr']
-                print(f"[Epoch {epoch+1}] Learning rate: {current_lr:.6e}")
 
             total_loss = train_epoch_step(
                 model=self.model,
@@ -258,20 +270,14 @@ class Trainer():
                             logging.log(logging.INFO, f'Early stopping at epoch {epoch + 1}')
                         break
 
-            if self.stats_file:
-                stats['epoch'] = epoch + 1
-                stats['train_loss'] = total_loss
-                stats['val_loss'] = val_loss
-                stats['learning_rate'] = current_lr if self.sch_lr else self.optimizer.param_groups[0]['lr']
-                stats['time_per_epoch'] = time.time() - t0
+            self._collect_stats(stats, t0, epoch, total_loss, val_loss, current_lr)
 
             if self.sch_lr:
                 current_lr = self.step_lr(lr_scheduler)
-                learn_rate.append(current_lr)
 
             if ((epoch + 1) % log_interval == 0):
-                elapsed_time = time.time() - t0
-                t0 = time.time()
+                elapsed_time = time.time() - t0_log
+                t0_log = time.time()
 
                 if logging and is_main_process():
                     logging.log(logging.INFO, f'Epoch {epoch + 1} - validation loss: {val_loss:.4f}')
@@ -280,14 +286,17 @@ class Trainer():
                     self.save_best_model_if_better_loss(epoch, val_loss, total_loss)
                 time_per_epoch = elapsed_time / log_interval
 
-                print(f'⏳ [Epoch {epoch + 1}] - train loss: {total_loss:.4f} - validation loss: {val_loss:.4f} - ({time_per_epoch:.2f}s/epoch)')
+                print(f'⏳ [Epoch {epoch + 1}]',
+                      f' - train loss: {total_loss:.4f}',
+                      f' - validation loss: {val_loss:.4f}',
+                      f' - lr: {current_lr:.5f}',
+                      f' - ({time_per_epoch:.2f}s/epoch)')
+
         if verbose and is_main_process():
-            print(f"\n Training completed. Best validation loss: {self.best_loss:.4f}")
+            print(f"\nTraining completed. Best validation loss: {self.best_loss:.4f}")
         
-        if self.stats_file and is_main_process():
+        if stats != {} and is_main_process():
             # Save training stats
-            stats['best_loss'] = self.best_loss
-            stats['learn_rate'] = learn_rate
             np.savez(self.stats_file, **stats)
             if verbose:
                 print(f"Training statistics saved to {self.stats_file}")
@@ -318,14 +327,15 @@ class Trainer():
             self.lr = self.config['TRAINING']['learning_rate']
             self.sch_lr = self.config['TRAINING']['scheduled_lr']
             self.has_early_stop = self.config['TRAINING']['early_stopping']
+            self.wght_dcay = self.config['TRAINING']['weight_decay']
         except KeyError as e:
             raise KeyError(f"Missing parameter in config: {e}")
 
     def _setup_files(self) -> None:
         # Set file names
         self.model_file = f"{self.models_dir}/model.pt"
-        self.stats_file = f"{self.stats_dir}/stats.dat"
         self.arch_file = f"{self.models_dir}/arch.dat"
+        self.stats_file = f"{self.stats_dir}/stats.npz"
         self.norm_files = {
             "subval_inputs": f"{self.norms_dir}/subval_inputs.npy",
             "divval_inputs": f"{self.norms_dir}/divval_inputs.npy",
@@ -376,7 +386,7 @@ class Trainer():
             dist.init_process_group(backend=backend, timeout=datetime.timedelta(minutes=30))
             torch.distributed.barrier()
             if is_main_process():
-                print(f"✅ DDP initialized successfully with {world_size} processes using {backend} backend")
+                print(f"🟢 DDP initialized successfully with {world_size} processes using {backend} backend")
         except Exception as e:
             print(f"❌ Failed to initialize DDP: {e}")
             raise

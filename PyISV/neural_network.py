@@ -3,8 +3,7 @@
 # for both autoencoding and classification tasks.   
 
 import torch, torch.nn as nn
-from PyISV.utils.training_utils import *
-from PyISV.utils.validation_utils import *
+from typing import Union, Optional
 from PyISV.model_building import (build_encoder, build_decoder, build_bottleneck)
 
 class NeuralNetwork(nn.Module):
@@ -31,7 +30,7 @@ class NeuralNetwork(nn.Module):
         # Store the last embedding for later access
         self.last_embedding = None
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         z = self.encoder(x)
         z_flat = z.view(z.size(0), -1)  # Flatten the tensor
         embedding = self.embed_linear(z_flat)
@@ -70,6 +69,6 @@ class NeuralNetwork(nn.Module):
             embedding = self.embed_linear(z_flat)
         return embedding
     
-    def get_last_embedding(self) -> torch.Tensor | None:
+    def get_last_embedding(self) -> Union[torch.Tensor, None]:
         """Return the last computed embedding"""
         return self.last_embedding

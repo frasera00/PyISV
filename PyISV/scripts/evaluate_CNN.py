@@ -5,25 +5,30 @@ import datetime, argparse, warnings, json, torch
 import numpy as np, pandas as pd, matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
-from typing import Optional 
+from typing import Optional , Union
 from pathlib import Path
 from tqdm import tqdm
 
-from PyISV.utils.set_architecture import import_config
-from PyISV.utils.training_utils import get_device, load_tensor, is_main_process
-from scripts.train_autoencoder import Trainer
-from PyISV.utils.define_root import PROJECT_ROOT as root_dir
+from PyISV.utils.training_utils import get_device
+from PyISV.scripts.train_CNN import Trainer
+from PyISV.utils.IO_utils import (load_tensor, is_main_process, 
+                                  import_config, find_project_root)
+
+root_dir = find_project_root()
 
 class Evaluator(Trainer):
     """Class to evaluate the autoencoder model."""
-    def __init__(self, config_file: str | Path,
+    def __init__(self, config_file: Union[str, Path],
                  run_id: Optional[str] = None,
                  models_dir: Optional[str] = None,
                  device: Optional[str] = None) -> None:
         
         # Import config
         self.run_id = run_id
-        self.config = import_config(config_file)
+        if isinstance(config_file, str):
+            self.config = import_config(json_file=config_file, param_dict=None)
+        elif isinstance(config_file, dict):
+            self.config = config_file
         self.input_shape = self.config["MODEL"]["input_shape"]
         self.device = device if device else get_device(self.config["GENERAL"]["device"])
         

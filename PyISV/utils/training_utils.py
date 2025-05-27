@@ -13,6 +13,27 @@ from torch.utils.data import Dataset as TorchDataset
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
     
+class VAELoss(nn.Module):
+    def __init__(self, reconstruction_weight=1.0, kl_weight=0.01, beta=1.0):
+        super(VAELoss, self).__init__()
+        self.reconstruction_weight = reconstruction_weight
+        self.kl_weight = kl_weight
+        self.beta = beta
+    
+    def forward(self, recon_x, x, mu, logvar):
+        # Reconstruction loss (MSE)
+        recon_loss = F.mse_loss(recon_x, x, reduction='mean')
+        
+        # KL divergence loss
+        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        kl_loss = kl_loss / x.size(0)  # Normalize by batch size
+        
+        # Total loss
+        total_loss = (self.reconstruction_weight * recon_loss + 
+                     self.kl_weight * self.beta * kl_loss)
+        
+        return total_loss
+
 class Dataset(TorchDataset): 
     def __init__(self,
                  inputs: torch.Tensor,

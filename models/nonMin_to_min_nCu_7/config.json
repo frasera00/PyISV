@@ -1,7 +1,7 @@
 {
     "GENERAL": {
         "device": "cuda",
-        "seed": 99536,
+        "seed": 72156,
         "apply_jit_tracing": false,
         "use_data_parallel": false,
         "use_ddp": true,
@@ -183,8 +183,8 @@
         "learning_rate": 0.0001,
         "normalization": "minmax",
         "weight_decay": 0.005,
-        "num_workers": 16,
-        "pin_memory": true,
+        "num_workers": 0,
+        "pin_memory": false,
         "scheduled_lr": true,
         "scheduler_params": {
             "lr_warmup_epochs": 0,

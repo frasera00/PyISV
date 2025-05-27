@@ -54,6 +54,7 @@ def calc_rdfs(params: dict) -> Tuple[torch.Tensor, list]:
 
     # Read XYZ file
     frames = read(xyz_file, index=":")
+    print(f"Total frames read: {len(frames)}")
 
     # Subset of frames for testing
     n_sub = int(len(frames) * fraction)
@@ -140,14 +141,14 @@ def calc_rdfs(params: dict) -> Tuple[torch.Tensor, list]:
             
         except Exception as e:
             print(f"Error processing frame {frame_idx.item()}: {e}")
-            skipped_frames.append(frame_idx.item())
+            skipped_frames.append([frame_idx.item(),str(e)])
     
     # Stack all frames
     if all_rdfs:
         rdf_tensor = torch.stack(all_rdfs, dim=0)
     else:
-        raise ValueError("No valid frames found for RDF calculation.")
-    
+        raise ValueError(f"No valid frames for species {species} RDF calculation.")
+
     # Save results
     torch.save(rdf_tensor, output_file)
     elapsed = time.time() - t0
